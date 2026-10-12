@@ -65,8 +65,8 @@ class HostEventSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Event
-        fields = ["id", "slug", "title", "description", "occasion", "cover_image",
-                  "starts_at", "venue", "dress_code", "visibility",
+        fields = ["id", "slug", "title", "description", "occasion", "category",
+                  "cover_image", "starts_at", "venue", "dress_code", "visibility",
                   "accepts_money", "accepts_wishlist", "accepts_wishes",
                   "is_published", "created_at",
                   "wishlist_items", "goals", "photos", "rsvp_yes_count",

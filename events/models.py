@@ -24,6 +24,8 @@ class Event(models.Model):
     title = models.CharField(max_length=140)
     description = models.TextField(blank=True)
     occasion = models.CharField(max_length=20, choices=Occasion.choices)
+    # Free-form sub-type of the occasion (e.g. "White wedding", "Traditional").
+    category = models.CharField(max_length=60, blank=True)
     # TextField (not URLField) so it can hold an uploaded image as a data URL
     # as well as an external URL (no media server in this build).
     cover_image = models.TextField(blank=True)
