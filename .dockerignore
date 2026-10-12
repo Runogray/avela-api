@@ -1,0 +1,40 @@
+# Keep the Django image lean — the Next.js app and local cruft never belong in it.
+frontend/
+node_modules/
+
+# VCS / editor / tooling
+.git/
+.gitignore
+.github/
+.claude/
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Local data / secrets / build output
+db.sqlite3
+.env
+.env.*
+!.env.example
+staticfiles/
+*.log
+
+# Docs (not needed at runtime)
+docs/
+*.md
+!README.md
+
+# Docker files themselves
+Dockerfile
+docker-compose*.yml
+.dockerignore

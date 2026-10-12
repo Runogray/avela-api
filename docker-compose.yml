@@ -1,0 +1,69 @@
+# Local/dev stack for the Avela API: Postgres + Django.
+# Usage:  docker compose up --build
+# The web service runs the Django dev server with live reload (code is mounted).
+# For a production-style run, see the note at the bottom of this file.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-avela}
+      POSTGRES_USER: ${DB_USER:-avela}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-avela}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5432}:5432"   # exposed for host tools (psql/GUI); optional
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-avela} -d ${DB_NAME:-avela}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build: .
+    # Dev server with autoreload (overrides the gunicorn CMD in the Dockerfile).
+    command: python manage.py runserver 0.0.0.0:8000
+    environment:
+      # Database (matches the db service; triggers the Postgres branch in settings)
+      DATABASE_URL_HOST: db
+      DB_NAME: ${DB_NAME:-avela}
+      DB_USER: ${DB_USER:-avela}
+      DB_PASSWORD: ${DB_PASSWORD:-avela}
+      DB_PORT: 5432
+      # Django
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-1}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-django-insecure-dev-key-change-me}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,0.0.0.0,web}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      # Email (OTP / reset codes). Defaults to console; set these in .env for
+      # real Gmail SMTP delivery.
+      DJANGO_EMAIL_BACKEND: ${DJANGO_EMAIL_BACKEND:-django.core.mail.backends.console.EmailBackend}
+      EMAIL_HOST: ${EMAIL_HOST:-}
+      EMAIL_PORT: ${EMAIL_PORT:-587}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-1}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-Avela <no-reply@localhost>}
+      EMAIL_OTP_TTL_MINUTES: ${EMAIL_OTP_TTL_MINUTES:-10}
+      # External gateways (stubs run fine with these blank)
+      PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
+      KYC_PROVIDER_KEY: ${KYC_PROVIDER_KEY:-}
+    volumes:
+      - .:/app          # live code reload in dev
+      - staticfiles:/app/staticfiles
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  staticfiles:
+
+# --- Production-style run (gunicorn, no mounted code, DEBUG off) --------------
+# Remove the `command` and the `.:/app` volume above, then:
+#   DJANGO_DEBUG=0 DJANGO_SECRET_KEY=<strong-random> \
+#   DJANGO_ALLOWED_HOSTS=api.example.com docker compose up --build
+# The image's default CMD (gunicorn) and collectstatic in entrypoint.sh take over.
