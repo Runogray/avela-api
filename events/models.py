@@ -130,6 +130,10 @@ class ContributionGoal(models.Model):
     name = models.CharField(max_length=140)
     target_kobo = models.BigIntegerField()
     raised_kobo = models.BigIntegerField(default=0)
+    # Guest-facing privacy: hide per-person contribution amounts and/or the
+    # running total raised on the public page.
+    hide_contributions = models.BooleanField(default=False)
+    hide_total = models.BooleanField(default=False)
 
     @property
     def progress_pct(self) -> float:

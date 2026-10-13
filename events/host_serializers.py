@@ -32,7 +32,8 @@ class HostContributionGoalSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ContributionGoal
-        fields = ["id", "name", "target_kobo", "raised_kobo", "progress_pct"]
+        fields = ["id", "name", "target_kobo", "raised_kobo", "progress_pct",
+                  "hide_contributions", "hide_total"]
         read_only_fields = ["raised_kobo", "progress_pct"]
 
 
