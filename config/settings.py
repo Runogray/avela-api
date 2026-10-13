@@ -186,10 +186,14 @@ if os.environ.get("DATABASE_URL_HOST"):
 
 # --- Email (OTP) -------------------------------------------------------------
 # Dev prints the email (incl. the OTP code) to the server console. Point
-# DJANGO_EMAIL_BACKEND at an SMTP backend + set the EMAIL_* vars for real sends.
+# DJANGO_EMAIL_BACKEND at an SMTP backend + set the EMAIL_* vars for real sends,
+# or at integrations.mailgun.MailgunEmailBackend + the MAILGUN_* vars.
 EMAIL_BACKEND = os.environ.get(
     "DJANGO_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
 )
+MAILGUN_API_KEY = os.environ.get("MAILGUN_API_KEY", "")
+MAILGUN_DOMAIN = os.environ.get("MAILGUN_DOMAIN", "")
+MAILGUN_API_BASE = os.environ.get("MAILGUN_API_BASE", "https://api.mailgun.net")
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
