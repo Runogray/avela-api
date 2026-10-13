@@ -9,7 +9,7 @@ The public serializer honours both (see giving/serializers.py).
 import uuid
 from django.db import models
 
-from events.models import Event, ContributionGoal
+from events.models import Event, ContributionGoal, WishlistItem
 
 
 class MonetaryGift(models.Model):
@@ -19,10 +19,19 @@ class MonetaryGift(models.Model):
         FAILED = "failed", "Failed"
         REVERSED = "reversed", "Reversed"         # chargeback
 
+    class Method(models.TextChoices):
+        GATEWAY = "gateway", "Card / gateway"        # Paystack checkout
+        BANK_TRANSFER = "transfer", "Bank transfer"  # guest pays the host's account directly
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="gifts")
     goal = models.ForeignKey(ContributionGoal, null=True, blank=True,
                              on_delete=models.SET_NULL, related_name="gifts")
+    # Cash toward a physical wishlist item (no raised total; shown to the host).
+    wishlist_item = models.ForeignKey(WishlistItem, null=True, blank=True,
+                                      on_delete=models.SET_NULL, related_name="gifts")
+    method = models.CharField(max_length=10, choices=Method.choices,
+                              default=Method.GATEWAY)
 
     amount_kobo = models.BigIntegerField()
     message = models.TextField(blank=True)
@@ -37,7 +46,11 @@ class MonetaryGift(models.Model):
 
     status = models.CharField(max_length=10, choices=Status.choices,
                               default=Status.INITIATED)
+    # Gateway reference, or for bank transfers the code the guest puts in
+    # the transfer narration so the host can match it (e.g. AV-7K3Q9P).
     gateway_reference = models.CharField(max_length=120, blank=True, db_index=True)
+    # Bank transfer: when the guest tapped "I've sent it" (host still confirms).
+    marked_sent_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     paid_at = models.DateTimeField(null=True, blank=True)
 

@@ -11,6 +11,11 @@ class CreateGiftSerializer(serializers.Serializer):
     show_amount = serializers.BooleanField(default=True)
 
 
+class CreateTransferGiftSerializer(CreateGiftSerializer):
+    giver_name = serializers.CharField(max_length=120)
+    wishlist_item_id = serializers.UUIDField(required=False, allow_null=True)
+
+
 class PublicGiftSerializer(serializers.ModelSerializer):
     """Honours both privacy axes: name and amount each hidden independently."""
     giver = serializers.SerializerMethodField()

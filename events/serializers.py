@@ -41,6 +41,9 @@ class PublicEventSerializer(serializers.ModelSerializer):
     rsvp_yes_count = serializers.SerializerMethodField()
     gifts_paused = serializers.SerializerMethodField()
     gallery = serializers.SerializerMethodField()
+    # The host has a bank account, so guests can pay cash gifts by transfer.
+    # (The account itself is only revealed once a guest starts a gift.)
+    accepts_transfers = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
@@ -49,7 +52,7 @@ class PublicEventSerializer(serializers.ModelSerializer):
                   "host_first_name",
                   "accepts_money", "accepts_wishlist", "accepts_wishes",
                   "wishlist_items", "goals", "wishes", "recent_gifts",
-                  "rsvp_yes_count", "gifts_paused", "gallery"]
+                  "rsvp_yes_count", "gifts_paused", "gallery", "accepts_transfers"]
 
     def get_gallery(self, obj):
         return [p.image for p in obj.photos.all()]
@@ -69,6 +72,9 @@ class PublicEventSerializer(serializers.ModelSerializer):
 
     def get_rsvp_yes_count(self, obj):
         return obj.rsvps.filter(status=RSVP.Status.YES).count()
+
+    def get_accepts_transfers(self, obj) -> bool:
+        return hasattr(obj.host, "bank_account")
 
     def get_gifts_paused(self, obj):
         """A3: unverified host already over the receiving cap — new gifts blocked."""

@@ -104,3 +104,23 @@ class InviteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Invite
         fields = ["id", "created_at", "event"]
+
+
+class HostTransferGiftSerializer(serializers.ModelSerializer):
+    """A bank-transfer gift as the host sees it (always shows name + amount)."""
+    reference = serializers.CharField(source="gateway_reference", read_only=True)
+    for_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = MonetaryGift
+        fields = ["id", "giver_name", "amount_kobo", "reference", "status",
+                  "goal_id", "wishlist_item_id", "for_name", "message",
+                  "marked_sent_at", "created_at", "paid_at"]
+        read_only_fields = fields
+
+    def get_for_name(self, obj) -> str:
+        if obj.goal_id:
+            return obj.goal.name
+        if obj.wishlist_item_id:
+            return obj.wishlist_item.name
+        return ""

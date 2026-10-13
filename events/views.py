@@ -7,9 +7,10 @@ from .models import Event, WishlistItem
 from .serializers import (PublicEventSerializer, RSVPSerializer,
                           WishlistItemSerializer)
 from giving.models import MonetaryGift, Wish
-from giving.serializers import (CreateGiftSerializer, PublicGiftSerializer,
-                                WishSerializer)
-from giving.services import create_gift, GiftBlocked
+from giving.serializers import (CreateGiftSerializer, CreateTransferGiftSerializer,
+                                PublicGiftSerializer, WishSerializer)
+from giving.services import (create_gift, create_transfer_gift, mark_transfer_sent,
+                             GiftBlocked, NoBankAccount)
 from events.models import ContributionGoal
 
 
@@ -61,6 +62,56 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
             {"gift_id": str(result["gift"].id),
              "checkout_url": result["checkout_url"]},
             status=status.HTTP_201_CREATED)
+
+
+    @decorators.action(detail=True, methods=["post"], url_path="transfers")
+    def start_transfer(self, request, slug=None):
+        """Guest picked an amount: record a pending bank-transfer gift and
+        return the host's account + a reference for the narration."""
+        event = self.get_object()
+        ser = CreateTransferGiftSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        goal = item = None
+        if data.get("goal_id"):
+            goal = ContributionGoal.objects.filter(id=data["goal_id"], event=event).first()
+        if data.get("wishlist_item_id"):
+            item = WishlistItem.objects.filter(id=data["wishlist_item_id"], event=event).first()
+        try:
+            result = create_transfer_gift(
+                event=event, amount_kobo=data["amount_kobo"], goal=goal,
+                wishlist_item=item, giver_name=data["giver_name"].strip(),
+                message=data.get("message", ""),
+                show_name=data["show_name"], show_amount=data["show_amount"],
+            )
+        except NoBankAccount as e:
+            return response.Response({"detail": str(e), "code": "no_bank_account"},
+                                     status=status.HTTP_409_CONFLICT)
+        except GiftBlocked as e:
+            return response.Response({"detail": str(e), "code": "host_capped"},
+                                     status=status.HTTP_409_CONFLICT)
+        gift, bank = result["gift"], result["bank"]
+        return response.Response({
+            "gift_id": str(gift.id),
+            "reference": gift.gateway_reference,
+            "amount_kobo": gift.amount_kobo,
+            "bank_name": bank.bank_name,
+            "account_number": bank.account_number,
+            "account_name": bank.account_name,
+        }, status=status.HTTP_201_CREATED)
+
+    @decorators.action(detail=True, methods=["post"],
+                       url_path=r"transfers/(?P<gift_id>[0-9a-f-]{36})/sent")
+    def transfer_sent(self, request, slug=None, gift_id=None):
+        """Guest tapped "I've sent it"."""
+        event = self.get_object()
+        gift = MonetaryGift.objects.filter(
+            id=gift_id, event=event, method=MonetaryGift.Method.BANK_TRANSFER).first()
+        if gift is None:
+            return response.Response(status=status.HTTP_404_NOT_FOUND)
+        mark_transfer_sent(gift)
+        return response.Response({"status": gift.status,
+                                  "marked_sent": bool(gift.marked_sent_at)})
 
 
 class ReserveView(viewsets.ViewSet):

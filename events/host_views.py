@@ -14,6 +14,9 @@ Routes (wired in config/urls.py):
   /api/host/goals/{id}/                     update / delete a goal
   /api/host/wishes/{id}/                    reply / hide / delete a wish
   /api/host/rsvps/{id}/                     assign a table number
+  /api/host/events/{id}/transfers/          list bank-transfer gifts
+  /api/host/events/{id}/transfers/{gift}/confirm/   money arrived -> counts
+  /api/host/events/{id}/transfers/{gift}/decline/   never arrived
 """
 import uuid
 
@@ -21,10 +24,12 @@ from django.utils.text import slugify
 from rest_framework import decorators, mixins, response, status, viewsets
 from rest_framework.permissions import IsAuthenticated
 
-from giving.models import Wish
+from giving.models import MonetaryGift, Wish
+from giving.services import confirm_gift, decline_transfer
 from .host_serializers import (EventPhotoSerializer,
                                HostContributionGoalSerializer,
                                HostEventSerializer, HostRSVPSerializer,
+                               HostTransferGiftSerializer,
                                HostWishSerializer, HostWishlistItemSerializer,
                                InviteSerializer)
 from .models import (ContributionGoal, Event, EventPhoto, Invite, RSVP,
@@ -65,6 +70,43 @@ class HostEventViewSet(viewsets.ModelViewSet):
         event.is_published = False
         event.save(update_fields=["is_published"])
         return response.Response(self.get_serializer(event).data)
+
+    @decorators.action(detail=True, methods=["get"])
+    def transfers(self, request, pk=None):
+        """Bank-transfer gifts on this event, pending first, newest first."""
+        event = self.get_object()
+        qs = (event.gifts.filter(method=MonetaryGift.Method.BANK_TRANSFER)
+              .exclude(status=MonetaryGift.Status.FAILED)
+              .select_related("goal", "wishlist_item"))
+        order = {MonetaryGift.Status.INITIATED: 0}
+        rows = sorted(qs, key=lambda g: (order.get(g.status, 1), -g.created_at.timestamp()))
+        return response.Response(HostTransferGiftSerializer(rows, many=True).data)
+
+    def _transfer(self, pk, gift_id):
+        event = self.get_object()
+        return event.gifts.filter(
+            id=gift_id, method=MonetaryGift.Method.BANK_TRANSFER).first()
+
+    @decorators.action(detail=True, methods=["post"],
+                       url_path=r"transfers/(?P<gift_id>[0-9a-f-]{36})/confirm")
+    def confirm_transfer(self, request, pk=None, gift_id=None):
+        gift = self._transfer(pk, gift_id)
+        if gift is None:
+            return response.Response(status=status.HTTP_404_NOT_FOUND)
+        if gift.status != MonetaryGift.Status.PAID:
+            gift = confirm_gift(gift)
+        return response.Response(HostTransferGiftSerializer(gift).data)
+
+    @decorators.action(detail=True, methods=["post"],
+                       url_path=r"transfers/(?P<gift_id>[0-9a-f-]{36})/decline")
+    def decline_transfer(self, request, pk=None, gift_id=None):
+        gift = self._transfer(pk, gift_id)
+        if gift is None:
+            return response.Response(status=status.HTTP_404_NOT_FOUND)
+        if gift.status == MonetaryGift.Status.PAID:
+            return response.Response({"detail": "Already confirmed."},
+                                     status=status.HTTP_409_CONFLICT)
+        return response.Response(HostTransferGiftSerializer(decline_transfer(gift)).data)
 
     @decorators.action(detail=True, methods=["get", "post"], url_path="wishlist-items")
     def wishlist_items(self, request, pk=None):
