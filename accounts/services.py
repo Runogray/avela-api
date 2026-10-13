@@ -1,7 +1,7 @@
 """Account-side services — email OTP + notification creation."""
 from django.conf import settings
-from django.core.mail import send_mail
 
+from .emails import send_password_reset_code, send_verification_code
 from .models import EmailOTP, Notification
 
 
@@ -14,17 +14,7 @@ def send_password_reset_otp(user) -> EmailOTP:
     """Issue + email a one-time code for resetting a forgotten password."""
     ttl = settings.EMAIL_OTP_TTL_MINUTES
     otp = EmailOTP.issue(user, ttl_minutes=ttl)
-    send_mail(
-        subject="Your Avela password reset code",
-        message=(
-            f"Your Avela password reset code is {otp.code}.\n"
-            f"It expires in {ttl} minutes.\n\n"
-            "If you didn't request this, you can safely ignore this email."
-        ),
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[user.email],
-        fail_silently=True,
-    )
+    send_password_reset_code(user, otp.code, ttl)
     return otp
 
 
@@ -36,15 +26,5 @@ def send_email_otp(user) -> EmailOTP:
     """
     ttl = settings.EMAIL_OTP_TTL_MINUTES
     otp = EmailOTP.issue(user, ttl_minutes=ttl)
-    send_mail(
-        subject="Your Avela verification code",
-        message=(
-            f"Your Avela verification code is {otp.code}.\n"
-            f"It expires in {ttl} minutes.\n\n"
-            "If you didn't request this, you can ignore this email."
-        ),
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[user.email],
-        fail_silently=True,
-    )
+    send_verification_code(user, otp.code, ttl)
     return otp
