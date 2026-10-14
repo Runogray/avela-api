@@ -16,15 +16,16 @@ class EventPhotoSerializer(serializers.ModelSerializer):
 
 class HostWishlistItemSerializer(serializers.ModelSerializer):
     reserver_display = serializers.ReadOnlyField()
+    raised_kobo = serializers.ReadOnlyField()
 
     class Meta:
         model = WishlistItem
         fields = ["id", "name", "description", "image", "link", "price_kobo",
                   "status", "reserved_by_name", "reserved_show_name",
-                  "reserved_at", "reserver_display"]
+                  "reserved_at", "reserver_display", "raised_kobo"]
         # Reservation state is driven by guests reserving, not by the host.
         read_only_fields = ["status", "reserved_by_name", "reserved_show_name",
-                            "reserved_at", "reserver_display"]
+                            "reserved_at", "reserver_display", "raised_kobo"]
 
 
 class HostContributionGoalSerializer(serializers.ModelSerializer):

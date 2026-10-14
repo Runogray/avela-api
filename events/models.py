@@ -91,6 +91,15 @@ class WishlistItem(models.Model):
             return ""
         return self.reserved_by_name if self.reserved_show_name else "Anonymous"
 
+    @property
+    def raised_kobo(self) -> int:
+        """Confirmed cash gifts toward this item (guests can chip in on a
+        physical gift as well as reserve it). Derived, not stored: transfers
+        are few per item and this keeps one source of truth."""
+        total = (self.gifts.filter(status="paid")
+                 .aggregate(total=models.Sum("amount_kobo"))["total"])
+        return total or 0
+
 
 class EventPhoto(models.Model):
     """A gallery photo on an event (stored as a data URL or external URL)."""

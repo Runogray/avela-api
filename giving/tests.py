@@ -28,7 +28,7 @@ class BankTransferGiftTests(APITestCase):
                                           account_number="0123456789", account_name="Amara Obi")
 
     def as_host(self, user=None):
-        token = Token.objects.create(user=user or self.host)
+        token, _ = Token.objects.get_or_create(user=user or self.host)
         self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
 
     def start(self, **extra):
@@ -124,3 +124,17 @@ class BankTransferGiftTests(APITestCase):
         self.assertEqual(self.client.get(base).status_code, 404)
         self.assertEqual(self.client.post(f"{base}{gift_id}/confirm/").status_code, 404)
         self.assertEqual(MonetaryGift.objects.get(id=gift_id).status, MonetaryGift.Status.INITIATED)
+
+    def test_confirmed_cash_toward_a_physical_item_shows_on_the_guest_page(self):
+        self.add_bank()
+        gift_id = self.start(goal_id=None, wishlist_item_id=str(self.item.id)).data["gift_id"]
+        public = f"/api/events/{self.event.slug}/"
+        item = lambda: next(w for w in self.client.get(public).data["wishlist_items"] if w["id"] == str(self.item.id))
+        self.assertEqual(item()["raised_kobo"], 0)  # pending doesn't count
+        self.as_host()
+        self.client.post(f"/api/host/events/{self.event.id}/transfers/{gift_id}/confirm/")
+        self.client.credentials()  # back to an anonymous guest
+        self.assertEqual(item()["raised_kobo"], 10_000_00)
+        self.as_host()
+        host_items = self.client.get(f"/api/host/events/{self.event.id}/").data["wishlist_items"]
+        self.assertEqual(host_items[0]["raised_kobo"], 10_000_00)

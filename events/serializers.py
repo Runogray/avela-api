@@ -6,12 +6,13 @@ from .models import Event, RSVP, WishlistItem, ContributionGoal
 
 class WishlistItemSerializer(serializers.ModelSerializer):
     reserver_display = serializers.ReadOnlyField()
+    raised_kobo = serializers.ReadOnlyField()
 
     class Meta:
         model = WishlistItem
         fields = ["id", "name", "description", "image", "link", "price_kobo",
-                  "status", "reserver_display"]
-        read_only_fields = ["status", "reserver_display"]
+                  "status", "reserver_display", "raised_kobo"]
+        read_only_fields = ["status", "reserver_display", "raised_kobo"]
 
 
 class ContributionGoalSerializer(serializers.ModelSerializer):
