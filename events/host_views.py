@@ -160,14 +160,34 @@ class _OwnedDetailViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin,
     permission_classes = [IsAuthenticated]
 
 
-class HostWishlistItemViewSet(_OwnedDetailViewSet):
+def _has_contributions(obj) -> bool:
+    """Confirmed gifts, or transfers still waiting for the host to confirm."""
+    return obj.gifts.filter(status__in=[MonetaryGift.Status.PAID,
+                                        MonetaryGift.Status.INITIATED]).exists()
+
+
+class _GiftHolderViewSet(_OwnedDetailViewSet):
+    """Items/goals that guests give toward. Deleting one with money on it
+    would orphan those gifts (they'd vanish from every total), so refuse."""
+
+    def destroy(self, request, *args, **kwargs):
+        if _has_contributions(self.get_object()):
+            return response.Response(
+                {"detail": "This gift has contributions, so it can't be removed. "
+                           "You can still rename or edit it.",
+                 "code": "has_contributions"},
+                status=status.HTTP_409_CONFLICT)
+        return super().destroy(request, *args, **kwargs)
+
+
+class HostWishlistItemViewSet(_GiftHolderViewSet):
     serializer_class = HostWishlistItemSerializer
 
     def get_queryset(self):
         return WishlistItem.objects.filter(event__host=self.request.user)
 
 
-class HostGoalViewSet(_OwnedDetailViewSet):
+class HostGoalViewSet(_GiftHolderViewSet):
     serializer_class = HostContributionGoalSerializer
 
     def get_queryset(self):

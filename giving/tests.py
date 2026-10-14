@@ -138,3 +138,27 @@ class BankTransferGiftTests(APITestCase):
         self.as_host()
         host_items = self.client.get(f"/api/host/events/{self.event.id}/").data["wishlist_items"]
         self.assertEqual(host_items[0]["raised_kobo"], 10_000_00)
+
+    def test_a_gift_with_contributions_cannot_be_deleted(self):
+        self.add_bank()
+        self.as_host()
+        # Pending transfer on the item, confirmed one on the goal.
+        self.start(goal_id=None, wishlist_item_id=str(self.item.id))
+        gift_id = self.start().data["gift_id"]
+        self.client.post(f"/api/host/events/{self.event.id}/transfers/{gift_id}/confirm/")
+
+        for url in (f"/api/host/wishlist-items/{self.item.id}/", f"/api/host/goals/{self.goal.id}/"):
+            res = self.client.delete(url)
+            self.assertEqual(res.status_code, 409, url)
+            self.assertEqual(res.data["code"], "has_contributions")
+        self.assertTrue(WishlistItem.objects.filter(id=self.item.id).exists())
+        host = self.client.get(f"/api/host/events/{self.event.id}/").data
+        self.assertTrue(host["wishlist_items"][0]["has_contributions"])
+        self.assertTrue(host["goals"][0]["has_contributions"])
+
+    def test_a_gift_with_only_declined_transfers_can_be_deleted(self):
+        self.add_bank()
+        self.as_host()
+        gift_id = self.start(goal_id=None, wishlist_item_id=str(self.item.id)).data["gift_id"]
+        self.client.post(f"/api/host/events/{self.event.id}/transfers/{gift_id}/decline/")
+        self.assertEqual(self.client.delete(f"/api/host/wishlist-items/{self.item.id}/").status_code, 204)

@@ -14,28 +14,44 @@ class EventPhotoSerializer(serializers.ModelSerializer):
         fields = ["id", "image", "order"]
 
 
+def _has_contributions(obj) -> bool:
+    return obj.gifts.filter(status__in=[MonetaryGift.Status.PAID,
+                                        MonetaryGift.Status.INITIATED]).exists()
+
+
 class HostWishlistItemSerializer(serializers.ModelSerializer):
     reserver_display = serializers.ReadOnlyField()
     raised_kobo = serializers.ReadOnlyField()
+    # Gifts with money on them can't be removed (see _GiftHolderViewSet).
+    has_contributions = serializers.SerializerMethodField()
+
+    def get_has_contributions(self, obj) -> bool:
+        return _has_contributions(obj)
 
     class Meta:
         model = WishlistItem
         fields = ["id", "name", "description", "image", "link", "price_kobo",
                   "status", "reserved_by_name", "reserved_show_name",
-                  "reserved_at", "reserver_display", "raised_kobo"]
+                  "reserved_at", "reserver_display", "raised_kobo",
+                  "has_contributions"]
         # Reservation state is driven by guests reserving, not by the host.
         read_only_fields = ["status", "reserved_by_name", "reserved_show_name",
-                            "reserved_at", "reserver_display", "raised_kobo"]
+                            "reserved_at", "reserver_display", "raised_kobo",
+                            "has_contributions"]
 
 
 class HostContributionGoalSerializer(serializers.ModelSerializer):
     progress_pct = serializers.ReadOnlyField()
+    has_contributions = serializers.SerializerMethodField()
+
+    def get_has_contributions(self, obj) -> bool:
+        return _has_contributions(obj)
 
     class Meta:
         model = ContributionGoal
         fields = ["id", "name", "target_kobo", "raised_kobo", "progress_pct",
-                  "hide_contributions", "hide_total"]
-        read_only_fields = ["raised_kobo", "progress_pct"]
+                  "hide_contributions", "hide_total", "has_contributions"]
+        read_only_fields = ["raised_kobo", "progress_pct", "has_contributions"]
 
 
 class HostRSVPSerializer(serializers.ModelSerializer):
