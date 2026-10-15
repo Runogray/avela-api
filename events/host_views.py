@@ -49,7 +49,7 @@ class HostEventViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return (Event.objects.filter(host=self.request.user)
-                .prefetch_related("wishlist_items", "goals")
+                .prefetch_related("wishlist_items__gifts", "goals__gifts", "photos")
                 .order_by("-created_at"))
 
     def perform_create(self, serializer):

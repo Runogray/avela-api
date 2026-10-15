@@ -5,21 +5,26 @@ from django.db.models import Sum
 from rest_framework import serializers
 
 from giving.models import MonetaryGift, Wish
+from .images import StoredImageField
 from .models import Event, EventPhoto, Invite, RSVP, WishlistItem, ContributionGoal
 
 
 class EventPhotoSerializer(serializers.ModelSerializer):
+    image = StoredImageField("photo", required=True, allow_blank=False)
+
     class Meta:
         model = EventPhoto
         fields = ["id", "image", "order"]
 
 
 def _has_contributions(obj) -> bool:
-    return obj.gifts.filter(status__in=[MonetaryGift.Status.PAID,
-                                        MonetaryGift.Status.INITIATED]).exists()
+    # Iterates gifts.all() so a prefetch (wishlist_items__gifts) is reused.
+    return any(g.status in (MonetaryGift.Status.PAID, MonetaryGift.Status.INITIATED)
+               for g in obj.gifts.all())
 
 
 class HostWishlistItemSerializer(serializers.ModelSerializer):
+    image = StoredImageField("item")
     reserver_display = serializers.ReadOnlyField()
     raised_kobo = serializers.ReadOnlyField()
     remaining_kobo = serializers.ReadOnlyField()
@@ -82,6 +87,7 @@ class HostEventSerializer(serializers.ModelSerializer):
     wishlist_items = HostWishlistItemSerializer(many=True, read_only=True)
     goals = HostContributionGoalSerializer(many=True, read_only=True)
     photos = EventPhotoSerializer(many=True, read_only=True)
+    cover_image = StoredImageField("cover")
 
     def validate_cover_position(self, value):
         return _clean_cover_position(value)
@@ -124,6 +130,7 @@ def _clean_cover_position(value: str) -> str:
 class InviteEventSummarySerializer(serializers.ModelSerializer):
     """Compact event fields for an invite card (the invitee isn't the host)."""
     host_first_name = serializers.CharField(source="host.first_name", read_only=True)
+    cover_image = StoredImageField("cover", read_only=True)
     wishlist_count = serializers.SerializerMethodField()
 
     class Meta:

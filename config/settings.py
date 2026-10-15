@@ -207,3 +207,11 @@ EMAIL_OTP_TTL_MINUTES = int(os.environ.get("EMAIL_OTP_TTL_MINUTES", "10"))
 # X-Paystack-Signature header (HMAC-SHA512 of the raw body). Blank = stub/dev.
 PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY", "")
 KYC_PROVIDER_KEY = os.environ.get("KYC_PROVIDER_KEY", "")
+
+
+# --- Images + proxy -----------------------------------------------------------
+# Image URLs in API responses are absolute. Behind nginx the request is http
+# on 127.0.0.1, so trust nginx's X-Forwarded-Proto (only nginx can reach us).
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+# Optional fixed origin for image URLs (e.g. https://api.avelaevent.com).
+API_PUBLIC_URL = os.environ.get("API_PUBLIC_URL", "")

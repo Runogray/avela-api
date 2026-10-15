@@ -20,7 +20,9 @@ from events.models import ContributionGoal
 
 class EventViewSet(viewsets.ReadOnlyModelViewSet):
     """Public read of a published event by slug, plus the guest action verbs."""
-    queryset = Event.objects.filter(is_published=True)
+    queryset = (Event.objects.filter(is_published=True)
+                .select_related("host")
+                .prefetch_related("wishlist_items__gifts", "goals", "photos"))
     serializer_class = PublicEventSerializer
     permission_classes = [AllowAny]
     lookup_field = "slug"

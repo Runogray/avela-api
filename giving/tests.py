@@ -6,7 +6,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
 
 from accounts.models import BankAccount, Notification, User
-from events.models import ContributionGoal, Event, WishlistItem
+from events.models import ContributionGoal, Event, EventPhoto, WishlistItem
 from wallet.models import Wallet
 from .models import MonetaryGift
 
@@ -210,10 +210,10 @@ class HostPhotoTests(APITestCase):
         b = self.client.post(base, {"image": "data:image/jpeg;base64,BBB", "order": 2}, format="json").data
         self.client.patch(f"/api/host/photos/{b['id']}/", {"order": 0}, format="json")
         public = self.client.get(f"/api/events/{self.event.slug}/").data["gallery"]
-        self.assertEqual(public, ["data:image/jpeg;base64,BBB", "data:image/jpeg;base64,AAA"])
+        self.assertEqual([u.split("/")[-3] for u in public], [b["id"], a["id"]])  # /api/img/photo/<id>/<sha>/
         self.assertEqual(self.client.delete(f"/api/host/photos/{a['id']}/").status_code, 204)
-        self.assertEqual(self.client.get(f"/api/events/{self.event.slug}/").data["gallery"],
-                         ["data:image/jpeg;base64,BBB"])
+        public = self.client.get(f"/api/events/{self.event.slug}/").data["gallery"]
+        self.assertEqual([u.split("/")[-3] for u in public], [b["id"]])
 
     def test_another_host_cannot_touch_photos(self):
         photo = self.client.post(f"/api/host/events/{self.event.id}/photos/",
@@ -399,3 +399,54 @@ class WishlistItemTakenTests(_GiftFixtures):
     def test_cash_goals_keep_accepting_gifts(self):
         self.add_bank()
         self.assertEqual(self.start(amount_kobo=60_000_00).status_code, 201)  # over the 50k target
+
+
+class ImageServingTests(APITestCase):
+    """Images go out as cacheable URLs, not megabytes of inline data."""
+
+    PNG = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+           "z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==")
+
+    def setUp(self):
+        self.host = User.objects.create_user("img@example.test", "pw-123456")
+        self.event = Event.objects.create(
+            host=self.host, slug="img-1", title="#Img", occasion="birthday",
+            starts_at=timezone.now() + timedelta(days=5), is_published=True, cover_image=self.PNG)
+        self.item = WishlistItem.objects.create(event=self.event, name="Kettle", price_kobo=30_000_00, image=self.PNG)
+        token, _ = Token.objects.get_or_create(user=self.host)
+        self.auth = {"HTTP_AUTHORIZATION": f"Token {token.key}"}
+
+    def test_public_event_sends_urls_and_the_url_serves_the_image(self):
+        data = self.client.get(f"/api/events/{self.event.slug}/").data
+        cover = data["cover_image"]
+        self.assertTrue(cover.startswith("http://testserver/api/img/cover/"), cover)
+        self.assertTrue(data["wishlist_items"][0]["image"].startswith("http://testserver/api/img/item/"))
+        res = self.client.get(cover.replace("http://testserver", ""))
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res["Content-Type"], "image/png")
+        self.assertIn("immutable", res["Cache-Control"])
+        self.assertTrue(res.content.startswith(b"\x89PNG"))
+
+    def test_sending_our_url_back_keeps_the_image(self):
+        url = self.client.get(f"/api/host/events/{self.event.id}/", **self.auth).data["cover_image"]
+        res = self.client.patch(f"/api/host/events/{self.event.id}/", {"cover_image": url}, format="json", **self.auth)
+        self.assertEqual(res.status_code, 200)
+        self.event.refresh_from_db()
+        self.assertEqual(self.event.cover_image, self.PNG)
+        # Moving the cover into the gallery copies the image itself.
+        photo = self.client.post(f"/api/host/events/{self.event.id}/photos/", {"image": url, "order": 1},
+                                 format="json", **self.auth)
+        self.assertEqual(photo.status_code, 201)
+        self.assertEqual(EventPhoto.objects.get(id=photo.data["id"]).image, self.PNG)
+
+    def test_public_event_query_count_does_not_grow_with_items(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        url = f"/api/events/{self.event.slug}/"
+        with CaptureQueriesContext(connection) as one:
+            self.client.get(url)
+        for i in range(8):
+            WishlistItem.objects.create(event=self.event, name=f"Gift {i}", price_kobo=10_000_00)
+        with CaptureQueriesContext(connection) as nine:
+            self.client.get(url)
+        self.assertEqual(len(nine), len(one))

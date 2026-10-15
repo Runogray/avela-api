@@ -1,10 +1,12 @@
 from rest_framework import serializers
 
 from config.constants import KYC_CAP_KOBO
+from .images import StoredImageField, image_url
 from .models import Event, RSVP, WishlistItem, ContributionGoal
 
 
 class WishlistItemSerializer(serializers.ModelSerializer):
+    image = StoredImageField("item")
     reserver_display = serializers.ReadOnlyField()
     raised_kobo = serializers.ReadOnlyField()
     remaining_kobo = serializers.ReadOnlyField()
@@ -38,6 +40,7 @@ class PublicEventSerializer(serializers.ModelSerializer):
     A3 'gift box is full' flag (gifts_paused).
     """
     wishlist_items = WishlistItemSerializer(many=True, read_only=True)
+    cover_image = StoredImageField("cover", read_only=True)
     goals = ContributionGoalSerializer(many=True, read_only=True)
     host_verified = serializers.BooleanField(source="host.nin_verified", read_only=True)
     host_first_name = serializers.CharField(source="host.first_name", read_only=True)
@@ -60,7 +63,8 @@ class PublicEventSerializer(serializers.ModelSerializer):
                   "rsvp_yes_count", "gifts_paused", "gallery", "accepts_transfers"]
 
     def get_gallery(self, obj):
-        return [p.image for p in obj.photos.all()]
+        req = self.context.get("request")
+        return [image_url(req, "photo", p.id, p.image) for p in obj.photos.all()]
 
     def get_wishes(self, obj):
         # Local import avoids an import cycle (giving.models -> events.models).

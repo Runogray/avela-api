@@ -1,5 +1,7 @@
 from django.contrib import admin
 from django.urls import path, include
+
+from events.images import serve_image
 from rest_framework.routers import DefaultRouter
 
 from accounts.views import NotificationViewSet
@@ -31,6 +33,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include("accounts.urls")),
     path("api/", include(router.urls)),
+    path("api/img/<str:kind>/<uuid:pk>/<str:sha>/", serve_image, name="image"),
     path("api/wishlist-items/<uuid:item_id>/reserve/",
          ReserveView.as_view({"post": "create"}), name="reserve"),
     path("api/wishlist-items/<uuid:item_id>/bought/",

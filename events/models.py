@@ -109,16 +109,15 @@ class WishlistItem(models.Model):
         """Confirmed cash gifts toward this item (guests can chip in on a
         physical gift as well as reserve it). Derived, not stored: transfers
         are few per item and this keeps one source of truth."""
-        total = (self.gifts.filter(status="paid")
-                 .aggregate(total=models.Sum("amount_kobo"))["total"])
-        return total or 0
+        # gifts.all() reuses a prefetch (wishlist_items__gifts) when present,
+        # so listing an event's items doesn't run several queries per item.
+        return sum(g.amount_kobo for g in self.gifts.all() if g.status == "paid")
 
     @property
     def awaiting_kobo(self) -> int:
         """Gifts a guest says they've sent that the host hasn't confirmed yet."""
-        total = (self.gifts.filter(status="initiated", marked_sent_at__isnull=False)
-                 .aggregate(total=models.Sum("amount_kobo"))["total"])
-        return total or 0
+        return sum(g.amount_kobo for g in self.gifts.all()
+                   if g.status == "initiated" and g.marked_sent_at is not None)
 
     @property
     def remaining_kobo(self) -> int | None:
@@ -131,9 +130,8 @@ class WishlistItem(models.Model):
     @property
     def has_committed_contributions(self) -> bool:
         """Money confirmed, or a guest who says they've sent it."""
-        return self.gifts.filter(
-            models.Q(status="paid") | models.Q(status="initiated", marked_sent_at__isnull=False)
-        ).exists()
+        return any(g.status == "paid" or (g.status == "initiated" and g.marked_sent_at is not None)
+                   for g in self.gifts.all())
 
     @property
     def is_held(self) -> bool:
