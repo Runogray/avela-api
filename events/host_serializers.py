@@ -22,6 +22,8 @@ def _has_contributions(obj) -> bool:
 class HostWishlistItemSerializer(serializers.ModelSerializer):
     reserver_display = serializers.ReadOnlyField()
     raised_kobo = serializers.ReadOnlyField()
+    remaining_kobo = serializers.ReadOnlyField()
+    availability = serializers.ReadOnlyField()
     # Gifts with money on them can't be removed (see _GiftHolderViewSet).
     has_contributions = serializers.SerializerMethodField()
 
@@ -33,11 +35,11 @@ class HostWishlistItemSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "description", "image", "link", "price_kobo",
                   "status", "reserved_by_name", "reserved_show_name",
                   "reserved_at", "reserver_display", "raised_kobo",
-                  "has_contributions"]
+                  "remaining_kobo", "availability", "has_contributions"]
         # Reservation state is driven by guests reserving, not by the host.
         read_only_fields = ["status", "reserved_by_name", "reserved_show_name",
                             "reserved_at", "reserver_display", "raised_kobo",
-                            "has_contributions"]
+                            "remaining_kobo", "availability", "has_contributions"]
 
 
 class HostContributionGoalSerializer(serializers.ModelSerializer):

@@ -10,7 +10,7 @@ from giving.models import MonetaryGift, Wish
 from giving.serializers import (CreateGiftSerializer, CreateTransferGiftSerializer,
                                 PublicGiftSerializer, WishSerializer)
 from giving.services import (create_gift, create_transfer_gift, mark_transfer_sent,
-                             GiftBlocked, NoBankAccount)
+                             GiftBlocked, GiftUnavailable, NoBankAccount)
 from events.models import ContributionGoal
 
 
@@ -87,6 +87,9 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
         except NoBankAccount as e:
             return response.Response({"detail": str(e), "code": "no_bank_account"},
                                      status=status.HTTP_409_CONFLICT)
+        except GiftUnavailable as e:
+            return response.Response({"detail": str(e), "code": e.code},
+                                     status=status.HTTP_409_CONFLICT)
         except GiftBlocked as e:
             return response.Response({"detail": str(e), "code": "host_capped"},
                                      status=status.HTTP_409_CONFLICT)
@@ -128,8 +131,23 @@ class ReserveView(viewsets.ViewSet):
                         .select_for_update()
                         .get(id=item_id))
                 if item.status == WishlistItem.Status.RESERVED:
-                    return response.Response({"detail": "Already reserved."},
-                                             status=status.HTTP_409_CONFLICT)
+                    return response.Response(
+                        {"detail": f"Someone has already bought {item.name}.",
+                         "code": "item_bought"},
+                        status=status.HTTP_409_CONFLICT)
+                if item.availability == "funded":
+                    return response.Response(
+                        {"detail": f"{item.name} is already fully funded.",
+                         "code": "item_funded"},
+                        status=status.HTTP_409_CONFLICT)
+                # Friends are already paying toward it: buying it outright
+                # as well would double up, so they contribute instead.
+                if item.has_committed_contributions:
+                    return response.Response(
+                        {"detail": f"Friends are already chipping in on {item.name}, "
+                                   "so it can't be bought outright. You can contribute instead.",
+                         "code": "has_contributions"},
+                        status=status.HTTP_409_CONFLICT)
                 item.status = WishlistItem.Status.RESERVED
                 item.reserved_by_name = request.data.get("guest_name", "")
                 item.reserved_show_name = request.data.get("show_name", True)

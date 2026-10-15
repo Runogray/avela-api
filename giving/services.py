@@ -34,6 +34,20 @@ class NoBankAccount(Exception):
     """The host hasn't added the bank account guests transfer into."""
 
 
+class GiftUnavailable(Exception):
+    """The wishlist item is already bought, fully funded, or the amount is
+    more than what's left to fund it."""
+
+    def __init__(self, message: str, code: str):
+        super().__init__(message)
+        self.code = code
+
+
+def naira_short(kobo: int) -> str:
+    value = kobo / 100
+    return f"₦{value:,.0f}" if kobo % 100 == 0 else f"₦{value:,.2f}"
+
+
 # No 0/O/1/I/L so the code survives being read aloud or typed into a bank app.
 _REF_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
 
@@ -80,6 +94,17 @@ def create_transfer_gift(*, event, amount_kobo, giver_name="", message="",
             f"{event.title} isn't set up to receive transfers yet. "
             "The host needs to add their bank account."
         )
+    if wishlist_item is not None:
+        state = wishlist_item.availability
+        if state == "reserved":
+            raise GiftUnavailable(f"Someone has already bought {wishlist_item.name}.", "item_bought")
+        if state == "funded":
+            raise GiftUnavailable(f"{wishlist_item.name} is already fully funded.", "item_funded")
+        remaining = wishlist_item.remaining_kobo
+        if remaining is not None and amount_kobo > remaining:
+            raise GiftUnavailable(
+                f"Only {naira_short(remaining)} is left to fully fund {wishlist_item.name}.",
+                "over_remaining")
     allowed, crossing = host.can_receive(amount_kobo)
     if not allowed:
         raise GiftBlocked(

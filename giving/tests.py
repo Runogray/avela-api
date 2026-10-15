@@ -11,8 +11,8 @@ from wallet.models import Wallet
 from .models import MonetaryGift
 
 
-class BankTransferGiftTests(APITestCase):
-    """Guest pays the host's own bank account; the host confirms it arrived."""
+class _GiftFixtures(APITestCase):
+    """Shared host, event, goal, item and helpers for the gift tests."""
 
     def setUp(self):
         self.host = User.objects.create_user("host@example.test", "pw-123456", first_name="Amara")
@@ -36,6 +36,11 @@ class BankTransferGiftTests(APITestCase):
         body = {"amount_kobo": 10_000_00, "giver_name": "Tobi", "goal_id": str(self.goal.id)}
         body.update(extra)
         return self.client.post(self.start_url, body, format="json")
+
+
+
+class BankTransferGiftTests(_GiftFixtures):
+    """Guest pays the host's own bank account; the host confirms it arrived."""
 
     def test_public_event_flags_whether_transfers_are_possible(self):
         url = f"/api/events/{self.event.slug}/"
@@ -240,3 +245,70 @@ class CoverPositionTests(APITestCase):
         url = f"/api/host/events/{self.event.id}/"
         for bad in ("left top", "120% 0%", "50%", "50% 50%; background:red"):
             self.assertEqual(self.client.patch(url, {"cover_position": bad}, format="json").status_code, 400, bad)
+
+
+class WishlistItemTakenTests(_GiftFixtures):
+    """A wishlist item is bought or funded once; then it's off the list."""
+
+    def item_state(self):
+        items = self.client.get(f"/api/events/{self.event.slug}/").data["wishlist_items"]
+        return next(w for w in items if w["id"] == str(self.item.id))
+
+    def reserve(self, name="Ada"):
+        return self.client.post(f"/api/wishlist-items/{self.item.id}/reserve/",
+                                {"guest_name": name, "show_name": True}, format="json")
+
+    def give(self, amount_kobo):
+        return self.start(goal_id=None, wishlist_item_id=str(self.item.id), amount_kobo=amount_kobo)
+
+    def test_a_bought_item_cannot_be_bought_or_funded_again(self):
+        self.add_bank()
+        self.assertEqual(self.reserve().status_code, 200)
+        self.assertEqual(self.item_state()["availability"], "reserved")
+        second = self.reserve("Kemi")
+        self.assertEqual(second.status_code, 409)
+        self.assertEqual(second.data["code"], "item_bought")
+        res = self.give(5_000_00)
+        self.assertEqual(res.status_code, 409)
+        self.assertEqual(res.data["code"], "item_bought")
+
+    def test_confirmed_gifts_that_cover_the_price_close_the_item(self):
+        self.add_bank()
+        a = self.give(20_000_00).data["gift_id"]
+        b = self.give(10_000_00).data["gift_id"]
+        self.assertEqual(self.item_state()["availability"], "available")  # pending doesn't count
+        self.as_host()
+        base = f"/api/host/events/{self.event.id}/transfers/"
+        self.client.post(f"{base}{a}/confirm/")
+        self.assertEqual(self.item_state()["remaining_kobo"], 10_000_00)
+        self.client.post(f"{base}{b}/confirm/")
+        self.client.credentials()
+        state = self.item_state()
+        self.assertEqual(state["availability"], "funded")
+        self.assertEqual(state["remaining_kobo"], 0)
+        self.assertEqual(self.give(1_000_00).data["code"], "item_funded")
+        self.assertEqual(self.reserve().data["code"], "item_funded")
+
+    def test_a_contribution_cannot_exceed_what_is_left(self):
+        self.add_bank()
+        res = self.give(30_000_01)
+        self.assertEqual(res.status_code, 409)
+        self.assertEqual(res.data["code"], "over_remaining")
+        self.assertIn("₦30,000", res.data["detail"])
+        self.assertEqual(self.give(30_000_00).status_code, 201)
+
+    def test_cannot_buy_outright_once_friends_are_chipping_in(self):
+        self.add_bank()
+        gift_id = self.give(5_000_00).data["gift_id"]
+        # A guest who only started a gift doesn't block buying...
+        self.assertNotEqual(self.reserve().data.get("code"), "has_contributions")
+        WishlistItem.objects.filter(id=self.item.id).update(status="available", reserved_by_name="")
+        # ...but one who says they've sent it does.
+        self.client.post(f"{self.start_url}{gift_id}/sent/")
+        res = self.reserve()
+        self.assertEqual(res.status_code, 409)
+        self.assertEqual(res.data["code"], "has_contributions")
+
+    def test_cash_goals_keep_accepting_gifts(self):
+        self.add_bank()
+        self.assertEqual(self.start(amount_kobo=60_000_00).status_code, 201)  # over the 50k target

@@ -103,6 +103,31 @@ class WishlistItem(models.Model):
                  .aggregate(total=models.Sum("amount_kobo"))["total"])
         return total or 0
 
+    @property
+    def remaining_kobo(self) -> int | None:
+        """What's left to fully fund it from confirmed gifts (None = no price)."""
+        if not self.price_kobo:
+            return None
+        return max(0, self.price_kobo - self.raised_kobo)
+
+    @property
+    def has_committed_contributions(self) -> bool:
+        """Money confirmed, or a guest who says they've sent it."""
+        return self.gifts.filter(
+            models.Q(status="paid") | models.Q(status="initiated", marked_sent_at__isnull=False)
+        ).exists()
+
+    @property
+    def availability(self) -> str:
+        """"reserved" (a guest is buying it), "funded" (confirmed gifts cover
+        the price) or "available". Taken items can't be bought or funded again."""
+        if self.status == self.Status.RESERVED:
+            return "reserved"
+        remaining = self.remaining_kobo
+        if remaining is not None and remaining == 0:
+            return "funded"
+        return "available"
+
 
 class EventPhoto(models.Model):
     """A gallery photo on an event (stored as a data URL or external URL)."""

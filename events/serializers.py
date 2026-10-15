@@ -7,12 +7,16 @@ from .models import Event, RSVP, WishlistItem, ContributionGoal
 class WishlistItemSerializer(serializers.ModelSerializer):
     reserver_display = serializers.ReadOnlyField()
     raised_kobo = serializers.ReadOnlyField()
+    remaining_kobo = serializers.ReadOnlyField()
+    availability = serializers.ReadOnlyField()
 
     class Meta:
         model = WishlistItem
         fields = ["id", "name", "description", "image", "link", "price_kobo",
-                  "status", "reserver_display", "raised_kobo"]
-        read_only_fields = ["status", "reserver_display", "raised_kobo"]
+                  "status", "reserver_display", "raised_kobo", "remaining_kobo",
+                  "availability"]
+        read_only_fields = ["status", "reserver_display", "raised_kobo",
+                            "remaining_kobo", "availability"]
 
 
 class ContributionGoalSerializer(serializers.ModelSerializer):
