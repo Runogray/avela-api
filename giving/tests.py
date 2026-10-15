@@ -279,19 +279,48 @@ class WishlistItemTakenTests(_GiftFixtures):
         until = WishlistItem.objects.get(id=self.item.id).reserved_until
         self.assertAlmostEqual((until - timezone.now()).total_seconds(), 600, delta=5)
 
-    def test_ive_bought_it_takes_the_item_off_the_list_for_good(self):
+    def test_ive_bought_it_is_pending_until_the_host_confirms(self):
         self.add_bank()
         token = self.reserve().data["hold_token"]
         self.assertEqual(self.bought("wrong-token").status_code, 409)
         res = self.bought(token)
         self.assertEqual(res.status_code, 200)
+        self.assertEqual(self.item_state()["availability"], "pending")
+        self.assertEqual(self.reserve("Kemi").data["code"], "item_pending")
+        self.assertEqual(self.give(5_000_00).data["code"], "item_pending")
+        self.assertTrue(Notification.objects.filter(user=self.host, title="Confirm a bought gift").exists())
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Kettle", mail.outbox[0].subject)
+        # Still pending after the 10 minutes are up.
+        WishlistItem.objects.filter(id=self.item.id).update(reserved_until=timezone.now() - timedelta(hours=1))
+        self.assertEqual(self.item_state()["availability"], "pending")
+        # The host marks it as received -> bought for good.
+        self.as_host()
+        confirm = self.client.post(f"/api/host/wishlist-items/{self.item.id}/confirm-bought/")
+        self.assertEqual(confirm.status_code, 200)
+        self.client.credentials()
         self.assertEqual(self.item_state()["availability"], "bought")
         self.assertEqual(self.reserve("Kemi").data["code"], "item_bought")
-        self.assertEqual(self.give(5_000_00).data["code"], "item_bought")
-        self.assertTrue(Notification.objects.filter(user=self.host, title="A gift was bought").exists())
-        # Still bought after the 10 minutes are up.
-        WishlistItem.objects.filter(id=self.item.id).update(reserved_until=timezone.now() - timedelta(hours=1))
-        self.assertEqual(self.item_state()["availability"], "bought")
+
+    def test_host_cannot_confirm_a_gift_nobody_bought(self):
+        self.as_host()
+        self.assertEqual(self.client.post(f"/api/host/wishlist-items/{self.item.id}/confirm-bought/").status_code, 409)
+
+    def test_gifts_awaiting_confirmation_that_cover_the_price_make_it_pending(self):
+        self.add_bank()
+        a = self.give(20_000_00).data["gift_id"]
+        b = self.give(10_000_00).data["gift_id"]
+        self.client.post(f"{self.start_url}{a}/sent/")
+        self.assertEqual(self.item_state()["remaining_kobo"], 10_000_00)  # what's still free to give
+        self.assertEqual(self.item_state()["availability"], "available")
+        self.client.post(f"{self.start_url}{b}/sent/")
+        self.assertEqual(self.item_state()["availability"], "pending")
+        self.assertEqual(self.give(1_000_00).data["code"], "item_pending")
+        # The host says one never arrived: the item reopens.
+        self.as_host()
+        self.client.post(f"/api/host/events/{self.event.id}/transfers/{b}/decline/")
+        self.client.credentials()
+        self.assertEqual(self.item_state()["availability"], "available")
 
     def test_an_unconfirmed_hold_lapses_and_the_item_is_free_again(self):
         self.add_bank()
@@ -300,7 +329,7 @@ class WishlistItemTakenTests(_GiftFixtures):
         self.assertEqual(self.item_state()["availability"], "available")
         # Nobody else took it yet: a late "I've bought it" still counts.
         self.assertEqual(self.bought(token).status_code, 200)
-        self.assertEqual(self.item_state()["availability"], "bought")
+        self.assertEqual(self.item_state()["availability"], "pending")
 
     def test_a_lapsed_hold_taken_by_someone_else_cannot_be_confirmed(self):
         self.add_bank()

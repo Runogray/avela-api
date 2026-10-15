@@ -20,6 +20,7 @@ Routes (wired in config/urls.py):
 """
 import uuid
 
+from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework import decorators, mixins, response, status, viewsets
 from rest_framework.permissions import IsAuthenticated
@@ -192,6 +193,18 @@ class HostWishlistItemViewSet(_GiftHolderViewSet):
         didn't actually buy it)."""
         item = self.get_object()
         item.release()
+        return response.Response(self.get_serializer(item).data)
+
+    @decorators.action(detail=True, methods=["post"], url_path="confirm-bought")
+    def confirm_bought(self, request, pk=None):
+        """Host: the gift a guest said they bought has arrived."""
+        item = self.get_object()
+        if item.purchased_at is None:
+            return response.Response({"detail": "Nobody has said they bought this gift yet."},
+                                     status=status.HTTP_409_CONFLICT)
+        if item.owner_confirmed_at is None:
+            item.owner_confirmed_at = timezone.now()
+            item.save(update_fields=["owner_confirmed_at"])
         return response.Response(self.get_serializer(item).data)
 
 

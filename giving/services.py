@@ -98,6 +98,10 @@ def create_transfer_gift(*, event, amount_kobo, giver_name="", message="",
         state = wishlist_item.availability
         if state == "bought":
             raise GiftUnavailable(f"Someone has already bought {wishlist_item.name}.", "item_bought")
+        if state == "pending":
+            raise GiftUnavailable(
+                f"{wishlist_item.name} is waiting for the host to confirm it. Check back later.",
+                "item_pending")
         if state == "held":
             raise GiftUnavailable(
                 f"Someone is buying {wishlist_item.name} right now. Check back in a few minutes.",

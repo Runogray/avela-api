@@ -148,6 +148,34 @@ def send_contribution_to_confirm(gift) -> None:
     _send(to=host.email, subject=f"Confirm a {amount} gift from {who}", text=text, html=html)
 
 
+def send_purchase_to_confirm(item) -> None:
+    """Tell the host a guest says they bought a wishlist gift, so they can
+    mark it as received once it arrives (or put it back on the list)."""
+    event = item.event
+    host = event.host
+    if not host.email:
+        return
+    who = (item.reserved_by_name or "A guest").strip()
+    url = f"{SITE_URL}/events/{event.id}"
+    intro = f"{who} says they bought {item.name} for {event.title}."
+    check = ("It's off your list for now so nobody buys it twice. Mark it as received once it "
+             "arrives, or put it back on your list if it doesn't.")
+    html = _layout(
+        preheader=f"{who} bought {item.name}. Mark it as received once it arrives.",
+        body_html=f"""
+    <h1 style="margin:0 0 10px;font-size:22px;line-height:1.3;font-weight:600;letter-spacing:-0.5px;color:{INK};">Confirm a bought gift</h1>
+    <p style="margin:0 0 6px;font-size:15px;line-height:1.6;color:{INK};">{escape(_greeting(host))}</p>
+    <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:{MUTED};">{escape(intro)}</p>
+    <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:{MUTED};">{escape(check)}</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%"><tr><td align="center">
+      <a href="{url}" style="display:inline-block;background:{TEAL};color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:14px 28px;border-radius:50px;">Review the gift</a>
+    </td></tr></table>""",
+    )
+    text = (f"{_greeting(host)}\n\n{intro}\n\n{check}\n\nReview the gift: {url}\n\n"
+            f"The Avela team\n{SITE_URL}\n")
+    _send(to=host.email, subject=f"{who} bought {item.name}: confirm when it arrives", text=text, html=html)
+
+
 def send_password_reset_code(user, code: str, ttl: int) -> None:
     intro = "We received a request to reset your Avela password. Enter this code to choose a new one."
     outro = "If you didn't ask to reset your password, you can ignore this email. Your password won't change."

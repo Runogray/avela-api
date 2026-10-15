@@ -1,3 +1,4 @@
+import logging
 import secrets
 from datetime import timedelta
 
@@ -128,6 +129,9 @@ def _gone(item):
     if state == "held":
         return {"detail": f"Someone is buying {item.name} right now. Check back in a few minutes.",
                 "code": "item_held"}
+    if state == "pending":
+        return {"detail": f"{item.name} is waiting for the host to confirm it. Check back later.",
+                "code": "item_pending"}
     if state == "funded":
         return {"detail": f"{item.name} is already fully funded.", "code": "item_funded"}
     return None
@@ -200,9 +204,14 @@ class ReserveView(viewsets.ViewSet):
                 item.save(update_fields=["purchased_at"])
                 from accounts.services import notify
                 who = item.reserved_by_name or "A guest"
-                notify(item.event.host, "contribution", "A gift was bought",
-                       f"{who} bought {item.name} for {item.event.title}. "
-                       "If that's not right, you can release it from the gift.")
+                notify(item.event.host, "contribution", "Confirm a bought gift",
+                       f"{who} says they bought {item.name} for {item.event.title}. "
+                       "Mark it as received once it arrives, or put it back on your list.")
+                from accounts.emails import send_purchase_to_confirm
+                try:
+                    send_purchase_to_confirm(item)
+                except Exception:
+                    logging.getLogger(__name__).exception("Couldn't email host about %s", item.id)
         return response.Response(WishlistItemSerializer(item).data)
 
     def release_hold(self, request, item_id=None):

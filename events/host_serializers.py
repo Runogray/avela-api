@@ -34,12 +34,13 @@ class HostWishlistItemSerializer(serializers.ModelSerializer):
         model = WishlistItem
         fields = ["id", "name", "description", "image", "link", "price_kobo",
                   "status", "reserved_by_name", "reserved_show_name",
-                  "reserved_at", "reserved_until", "purchased_at", "reserver_display",
+                  "reserved_at", "reserved_until", "purchased_at", "owner_confirmed_at",
+                  "reserver_display",
                   "raised_kobo", "remaining_kobo", "availability", "has_contributions"]
         # Reservation state is driven by guests reserving, not by the host.
         read_only_fields = ["status", "reserved_by_name", "reserved_show_name",
                             "reserved_at", "reserved_until", "purchased_at",
-                            "reserver_display", "raised_kobo", "remaining_kobo",
+                            "owner_confirmed_at", "reserver_display", "raised_kobo", "remaining_kobo",
                             "availability", "has_contributions"]
 
 

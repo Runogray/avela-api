@@ -93,6 +93,8 @@ class WishlistItem(models.Model):
     reserved_until = models.DateTimeField(null=True, blank=True)
     reserve_token = models.CharField(max_length=64, blank=True)
     purchased_at = models.DateTimeField(null=True, blank=True)
+    # The host confirmed the bought gift arrived (until then it's "pending").
+    owner_confirmed_at = models.DateTimeField(null=True, blank=True)
 
     HOLD_MINUTES = 10
 
@@ -112,11 +114,19 @@ class WishlistItem(models.Model):
         return total or 0
 
     @property
+    def awaiting_kobo(self) -> int:
+        """Gifts a guest says they've sent that the host hasn't confirmed yet."""
+        total = (self.gifts.filter(status="initiated", marked_sent_at__isnull=False)
+                 .aggregate(total=models.Sum("amount_kobo"))["total"])
+        return total or 0
+
+    @property
     def remaining_kobo(self) -> int | None:
-        """What's left to fully fund it from confirmed gifts (None = no price)."""
+        """What guests can still give (None = no price): the price less
+        confirmed gifts and ones awaiting the host's confirmation."""
         if not self.price_kobo:
             return None
-        return max(0, self.price_kobo - self.raised_kobo)
+        return max(0, self.price_kobo - self.raised_kobo - self.awaiting_kobo)
 
     @property
     def has_committed_contributions(self) -> bool:
@@ -134,16 +144,20 @@ class WishlistItem(models.Model):
 
     @property
     def availability(self) -> str:
-        """"bought" (a guest confirmed buying it), "held" (a guest has it for
-        a few minutes while they buy it), "funded" (confirmed gifts cover the
-        price) or "available". Only "available" items can be bought or funded."""
+        """"bought" (the host confirmed a guest bought it), "pending" (bought,
+        or covered by gifts, but awaiting the host's confirmation), "held" (a
+        guest has it for a few minutes while they buy it), "funded" (confirmed
+        gifts cover the price) or "available". Only "available" items can be
+        bought or given toward."""
         if self.status == self.Status.RESERVED and self.purchased_at is not None:
-            return "bought"
+            return "bought" if self.owner_confirmed_at else "pending"
         if self.is_held:
             return "held"
-        remaining = self.remaining_kobo
-        if remaining is not None and remaining == 0:
-            return "funded"
+        if self.price_kobo:
+            if self.raised_kobo >= self.price_kobo:
+                return "funded"
+            if self.raised_kobo + self.awaiting_kobo >= self.price_kobo:
+                return "pending"  # covered, but the host hasn't confirmed it all
         return "available"
 
     def release(self):
@@ -154,8 +168,10 @@ class WishlistItem(models.Model):
         self.reserved_until = None
         self.reserve_token = ""
         self.purchased_at = None
+        self.owner_confirmed_at = None
         self.save(update_fields=["status", "reserved_by_name", "reserved_at",
-                                 "reserved_until", "reserve_token", "purchased_at"])
+                                 "reserved_until", "reserve_token", "purchased_at",
+                                 "owner_confirmed_at"])
 
 
 class EventPhoto(models.Model):
