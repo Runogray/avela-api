@@ -87,6 +87,14 @@ class WishlistItem(models.Model):
     reserved_by_name = models.CharField(max_length=120, blank=True)
     reserved_show_name = models.BooleanField(default=True)
     reserved_at = models.DateTimeField(null=True, blank=True)
+    # "Buy the gift" holds the item for HOLD_MINUTES so the guest can go buy
+    # it; "I've bought it" (proved with the hold token) makes it bought for
+    # good. An unconfirmed hold simply lapses and the item is free again.
+    reserved_until = models.DateTimeField(null=True, blank=True)
+    reserve_token = models.CharField(max_length=64, blank=True)
+    purchased_at = models.DateTimeField(null=True, blank=True)
+
+    HOLD_MINUTES = 10
 
     @property
     def reserver_display(self) -> str:
@@ -118,15 +126,36 @@ class WishlistItem(models.Model):
         ).exists()
 
     @property
+    def is_held(self) -> bool:
+        """A guest is mid-purchase: reserved, not yet bought, hold not lapsed."""
+        from django.utils import timezone
+        return (self.status == self.Status.RESERVED and self.purchased_at is None
+                and self.reserved_until is not None and self.reserved_until > timezone.now())
+
+    @property
     def availability(self) -> str:
-        """"reserved" (a guest is buying it), "funded" (confirmed gifts cover
-        the price) or "available". Taken items can't be bought or funded again."""
-        if self.status == self.Status.RESERVED:
-            return "reserved"
+        """"bought" (a guest confirmed buying it), "held" (a guest has it for
+        a few minutes while they buy it), "funded" (confirmed gifts cover the
+        price) or "available". Only "available" items can be bought or funded."""
+        if self.status == self.Status.RESERVED and self.purchased_at is not None:
+            return "bought"
+        if self.is_held:
+            return "held"
         remaining = self.remaining_kobo
         if remaining is not None and remaining == 0:
             return "funded"
         return "available"
+
+    def release(self):
+        """Back on the list (hold lapsed or cancelled, or the host undid it)."""
+        self.status = self.Status.AVAILABLE
+        self.reserved_by_name = ""
+        self.reserved_at = None
+        self.reserved_until = None
+        self.reserve_token = ""
+        self.purchased_at = None
+        self.save(update_fields=["status", "reserved_by_name", "reserved_at",
+                                 "reserved_until", "reserve_token", "purchased_at"])
 
 
 class EventPhoto(models.Model):

@@ -96,8 +96,12 @@ def create_transfer_gift(*, event, amount_kobo, giver_name="", message="",
         )
     if wishlist_item is not None:
         state = wishlist_item.availability
-        if state == "reserved":
+        if state == "bought":
             raise GiftUnavailable(f"Someone has already bought {wishlist_item.name}.", "item_bought")
+        if state == "held":
+            raise GiftUnavailable(
+                f"Someone is buying {wishlist_item.name} right now. Check back in a few minutes.",
+                "item_held")
         if state == "funded":
             raise GiftUnavailable(f"{wishlist_item.name} is already fully funded.", "item_funded")
         remaining = wishlist_item.remaining_kobo

@@ -1,3 +1,6 @@
+import secrets
+from datetime import timedelta
+
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import viewsets, decorators, response, status
@@ -117,29 +120,32 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
                                   "marked_sent": bool(gift.marked_sent_at)})
 
 
+def _gone(item):
+    """A 409 for an item that's bought, held by someone else, or funded."""
+    state = item.availability
+    if state == "bought":
+        return {"detail": f"Someone has already bought {item.name}.", "code": "item_bought"}
+    if state == "held":
+        return {"detail": f"Someone is buying {item.name} right now. Check back in a few minutes.",
+                "code": "item_held"}
+    if state == "funded":
+        return {"detail": f"{item.name} is already fully funded.", "code": "item_funded"}
+    return None
+
+
 class ReserveView(viewsets.ViewSet):
+    """Guest "Buy the gift": hold the item for HOLD_MINUTES, then confirm with
+    "I've bought it" (bought for good) or let the hold lapse / cancel it.
+    Rows are locked FOR UPDATE so two guests can't both win the same item."""
     permission_classes = [AllowAny]
 
     def create(self, request, item_id=None):
-        """Reserve a wishlist item, locking the row so two simultaneous
-        reservations can't both win (D2 reserve-lock). The row is selected
-        FOR UPDATE inside the transaction; the second caller then sees it as
-        already reserved and gets a 409."""
         try:
             with transaction.atomic():
-                item = (WishlistItem.objects
-                        .select_for_update()
-                        .get(id=item_id))
-                if item.status == WishlistItem.Status.RESERVED:
-                    return response.Response(
-                        {"detail": f"Someone has already bought {item.name}.",
-                         "code": "item_bought"},
-                        status=status.HTTP_409_CONFLICT)
-                if item.availability == "funded":
-                    return response.Response(
-                        {"detail": f"{item.name} is already fully funded.",
-                         "code": "item_funded"},
-                        status=status.HTTP_409_CONFLICT)
+                item = WishlistItem.objects.select_for_update().get(id=item_id)
+                gone = _gone(item)
+                if gone:
+                    return response.Response(gone, status=status.HTTP_409_CONFLICT)
                 # Friends are already paying toward it: buying it outright
                 # as well would double up, so they contribute instead.
                 if item.has_committed_contributions:
@@ -148,13 +154,63 @@ class ReserveView(viewsets.ViewSet):
                                    "so it can't be bought outright. You can contribute instead.",
                          "code": "has_contributions"},
                         status=status.HTTP_409_CONFLICT)
+                now = timezone.now()
                 item.status = WishlistItem.Status.RESERVED
-                item.reserved_by_name = request.data.get("guest_name", "")
+                item.reserved_by_name = (request.data.get("guest_name") or "").strip()[:120]
                 item.reserved_show_name = request.data.get("show_name", True)
-                item.reserved_at = timezone.now()
-                item.save(update_fields=["status", "reserved_by_name",
-                                         "reserved_show_name", "reserved_at"])
+                item.reserved_at = now
+                item.reserved_until = now + timedelta(minutes=WishlistItem.HOLD_MINUTES)
+                item.reserve_token = secrets.token_urlsafe(24)
+                item.purchased_at = None
+                item.save(update_fields=["status", "reserved_by_name", "reserved_show_name",
+                                         "reserved_at", "reserved_until", "reserve_token",
+                                         "purchased_at"])
         except WishlistItem.DoesNotExist:
             return response.Response({"detail": "Item not found."},
                                      status=status.HTTP_404_NOT_FOUND)
+        data = WishlistItemSerializer(item).data
+        # Only the guest holding it gets the token that confirms or cancels.
+        data.update(hold_token=item.reserve_token, reserved_until=item.reserved_until)
+        return response.Response(data)
+
+    def _held_by(self, request, item_id):
+        """The item, locked, if the caller's hold token still owns it."""
+        item = WishlistItem.objects.select_for_update().filter(id=item_id).first()
+        token = request.data.get("hold_token") or ""
+        if item is None:
+            return None, response.Response({"detail": "Item not found."},
+                                            status=status.HTTP_404_NOT_FOUND)
+        owns = (token and item.status == WishlistItem.Status.RESERVED
+                and secrets.compare_digest(token, item.reserve_token))
+        if not owns:
+            gone = _gone(item) or {"detail": f"Your hold on {item.name} has ended. "
+                                             "You can reserve it again.", "code": "hold_ended"}
+            return None, response.Response(gone, status=status.HTTP_409_CONFLICT)
+        return item, None
+
+    def bought(self, request, item_id=None):
+        """Guest tapped "I've bought it". Accepted after the 10 minutes too,
+        as long as nobody else has taken the item since."""
+        with transaction.atomic():
+            item, error = self._held_by(request, item_id)
+            if error:
+                return error
+            if item.purchased_at is None:
+                item.purchased_at = timezone.now()
+                item.save(update_fields=["purchased_at"])
+                from accounts.services import notify
+                who = item.reserved_by_name or "A guest"
+                notify(item.event.host, "contribution", "A gift was bought",
+                       f"{who} bought {item.name} for {item.event.title}. "
+                       "If that's not right, you can release it from the gift.")
+        return response.Response(WishlistItemSerializer(item).data)
+
+    def release_hold(self, request, item_id=None):
+        """Guest changed their mind before buying: put it back."""
+        with transaction.atomic():
+            item, error = self._held_by(request, item_id)
+            if error:
+                return error
+            if item.purchased_at is None:
+                item.release()
         return response.Response(WishlistItemSerializer(item).data)

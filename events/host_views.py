@@ -186,6 +186,14 @@ class HostWishlistItemViewSet(_GiftHolderViewSet):
     def get_queryset(self):
         return WishlistItem.objects.filter(event__host=self.request.user)
 
+    @decorators.action(detail=True, methods=["post"])
+    def release(self, request, pk=None):
+        """Host puts a bought or held gift back on the list (e.g. the guest
+        didn't actually buy it)."""
+        item = self.get_object()
+        item.release()
+        return response.Response(self.get_serializer(item).data)
+
 
 class HostGoalViewSet(_GiftHolderViewSet):
     serializer_class = HostContributionGoalSerializer
