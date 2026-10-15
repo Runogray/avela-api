@@ -84,7 +84,7 @@ def create_gift(*, event, amount_kobo, giver_name="", message="",
     return {"gift": gift, "checkout_url": init["checkout_url"]}
 
 
-def create_transfer_gift(*, event, amount_kobo, giver_name="", message="",
+def create_transfer_gift(*, event, amount_kobo, giver_name="", giver_email="", message="",
                          show_name=True, show_amount=True, goal=None,
                          wishlist_item=None) -> dict:
     host = event.host
@@ -122,6 +122,7 @@ def create_transfer_gift(*, event, amount_kobo, giver_name="", message="",
     gift = MonetaryGift.objects.create(
         event=event, goal=goal, wishlist_item=wishlist_item,
         amount_kobo=amount_kobo, message=message, giver_name=giver_name,
+        giver_email=giver_email,
         show_name=show_name, show_amount=show_amount, is_crossing=crossing,
         method=MonetaryGift.Method.BANK_TRANSFER,
         gateway_reference=_transfer_reference(),
@@ -151,11 +152,31 @@ def mark_transfer_sent(gift: MonetaryGift) -> MonetaryGift:
     return gift
 
 
+def _email_guest(send, *args):
+    """Guest emails are best-effort: never fail the host's action over them."""
+    try:
+        send(*args)
+    except Exception:
+        logging.getLogger(__name__).exception("Couldn't email guest")
+
+
 def decline_transfer(gift: MonetaryGift) -> MonetaryGift:
     """Host says the transfer never arrived."""
     if gift.status == MonetaryGift.Status.INITIATED:
         gift.status = MonetaryGift.Status.FAILED
         gift.save(update_fields=["status"])
+        if gift.giver_email and gift.method == MonetaryGift.Method.BANK_TRANSFER:
+            from accounts.emails import send_gift_not_received
+            _email_guest(send_gift_not_received, gift)
+    return gift
+
+
+def send_gift_thank_you(gift: MonetaryGift, message: str) -> MonetaryGift:
+    gift.thank_you_message = message
+    gift.thanked_at = timezone.now()
+    gift.save(update_fields=["thank_you_message", "thanked_at"])
+    from accounts.emails import send_thank_you
+    _email_guest(send_thank_you, gift.giver_email, gift.giver_name, gift.event, message)
     return gift
 
 
@@ -191,4 +212,8 @@ def confirm_gift(gift: MonetaryGift) -> MonetaryGift:
     if gift.method == MonetaryGift.Method.GATEWAY:
         notify(host, "contribution", "New contribution",
                f"{gift.public_giver} sent {naira(gift.amount_kobo)} on {gift.event.title}.")
+    elif gift.giver_email:
+        from accounts.emails import send_gift_received
+        _email_guest(send_gift_received, gift.giver_email, gift.giver_name, gift.event,
+                     f"your {naira_short(gift.amount_kobo)} gift")
     return gift

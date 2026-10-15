@@ -37,6 +37,11 @@ class MonetaryGift(models.Model):
     message = models.TextField(blank=True)
 
     giver_name = models.CharField(max_length=120, blank=True)
+    # Optional: lets us tell the guest when the host confirms it, and lets
+    # the host send a thank-you note.
+    giver_email = models.EmailField(blank=True)
+    thank_you_message = models.TextField(blank=True)
+    thanked_at = models.DateTimeField(null=True, blank=True)
     show_name = models.BooleanField(default=True)
     show_amount = models.BooleanField(default=True)
 

@@ -40,12 +40,13 @@ class HostWishlistItemSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "description", "image", "link", "price_kobo",
                   "status", "reserved_by_name", "reserved_show_name",
                   "reserved_at", "reserved_until", "purchased_at", "owner_confirmed_at",
-                  "reserver_display",
+                  "reserved_by_email", "thanked_at", "thank_you_message", "reserver_display",
                   "raised_kobo", "remaining_kobo", "availability", "has_contributions"]
         # Reservation state is driven by guests reserving, not by the host.
         read_only_fields = ["status", "reserved_by_name", "reserved_show_name",
                             "reserved_at", "reserved_until", "purchased_at",
-                            "owner_confirmed_at", "reserver_display", "raised_kobo", "remaining_kobo",
+                            "owner_confirmed_at", "reserved_by_email", "thanked_at",
+                            "thank_you_message", "reserver_display", "raised_kobo", "remaining_kobo",
                             "availability", "has_contributions"]
 
 
@@ -157,7 +158,8 @@ class HostTransferGiftSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = MonetaryGift
-        fields = ["id", "giver_name", "amount_kobo", "reference", "status",
+        fields = ["id", "giver_name", "giver_email", "thanked_at", "thank_you_message",
+                  "amount_kobo", "reference", "status",
                   "goal_id", "wishlist_item_id", "for_name", "message",
                   "marked_sent_at", "created_at", "paid_at"]
         read_only_fields = fields

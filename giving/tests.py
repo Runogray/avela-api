@@ -450,3 +450,76 @@ class ImageServingTests(APITestCase):
         with CaptureQueriesContext(connection) as nine:
             self.client.get(url)
         self.assertEqual(len(nine), len(one))
+
+
+class GuestEmailAndThankYouTests(_GiftFixtures):
+    """Guests who leave an email hear when their gift lands, and get thanked."""
+
+    def test_guest_is_emailed_when_the_host_confirms_and_can_be_thanked(self):
+        self.add_bank()
+        gift_id = self.start(giver_email="Tobi@Example.test").data["gift_id"]
+        self.assertEqual(MonetaryGift.objects.get(id=gift_id).giver_email, "tobi@example.test")
+        self.as_host()
+        base = f"/api/host/events/{self.event.id}/transfers/{gift_id}"
+        # Can't thank before the gift is received.
+        self.assertEqual(self.client.post(f"{base}/thank-you/", {"message": "Thanks!"}, format="json").status_code, 409)
+        mail.outbox.clear()
+        self.client.post(f"{base}/confirm/")
+        self.assertEqual([m.to for m in mail.outbox], [["tobi@example.test"]])
+        self.assertEqual(mail.outbox[0].subject, "Amara received your gift")
+        self.assertIn("₦10,000", mail.outbox[0].body)
+        mail.outbox.clear()
+        self.assertEqual(self.client.post(f"{base}/thank-you/", {"message": ""}, format="json").status_code, 400)
+        res = self.client.post(f"{base}/thank-you/", {"message": "Thank you Tobi!\nSee you there."}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.data["thanked_at"])
+        self.assertEqual(mail.outbox[0].subject, "A thank-you from Amara")
+        self.assertIn("See you there.", mail.outbox[0].body)
+        self.assertIn("Thank you Tobi!<br>See you there.", mail.outbox[0].alternatives[0][0])
+
+    def test_guest_is_told_when_the_transfer_did_not_arrive(self):
+        self.add_bank()
+        gift_id = self.start(giver_email="tobi@example.test").data["gift_id"]
+        self.as_host()
+        mail.outbox.clear()
+        self.client.post(f"/api/host/events/{self.event.id}/transfers/{gift_id}/decline/")
+        self.assertEqual(mail.outbox[0].to, ["tobi@example.test"])
+        self.assertIn("hasn't arrived", mail.outbox[0].subject)
+
+    def test_no_guest_email_means_no_guest_mail_and_no_thank_you(self):
+        self.add_bank()
+        gift_id = self.start().data["gift_id"]
+        self.as_host()
+        mail.outbox.clear()
+        self.client.post(f"/api/host/events/{self.event.id}/transfers/{gift_id}/confirm/")
+        self.assertEqual(mail.outbox, [])
+        res = self.client.post(f"/api/host/events/{self.event.id}/transfers/{gift_id}/thank-you/",
+                               {"message": "Thanks"}, format="json")
+        self.assertEqual(res.status_code, 409)
+
+    def test_bad_guest_emails_are_rejected(self):
+        self.add_bank()
+        self.assertEqual(self.start(giver_email="not-an-email").status_code, 400)
+        res = self.client.post(f"/api/wishlist-items/{self.item.id}/reserve/",
+                               {"guest_name": "Ada", "guest_email": "nope"}, format="json")
+        self.assertEqual(res.status_code, 400)
+
+    def test_buyer_is_emailed_when_received_and_can_be_thanked(self):
+        token = self.client.post(f"/api/wishlist-items/{self.item.id}/reserve/",
+                                 {"guest_name": "Ada Obi", "guest_email": "ada@example.test"},
+                                 format="json").data["hold_token"]
+        self.client.post(f"/api/wishlist-items/{self.item.id}/bought/", {"hold_token": token}, format="json")
+        self.as_host()
+        mail.outbox.clear()
+        self.client.post(f"/api/host/wishlist-items/{self.item.id}/confirm-bought/")
+        self.assertEqual(mail.outbox[0].to, ["ada@example.test"])
+        self.assertIn("Kettle", mail.outbox[0].body)
+        self.assertIn("Hi Ada,", mail.outbox[0].body)
+        res = self.client.post(f"/api/host/wishlist-items/{self.item.id}/thank-you/",
+                               {"message": "Love the kettle!"}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["reserved_by_email"], "ada@example.test")
+        self.assertTrue(res.data["thanked_at"])
+        # Putting it back on the list clears the buyer's details.
+        released = self.client.post(f"/api/host/wishlist-items/{self.item.id}/release/").data
+        self.assertEqual(released["reserved_by_email"], "")

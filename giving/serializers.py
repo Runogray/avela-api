@@ -13,6 +13,7 @@ class CreateGiftSerializer(serializers.Serializer):
 
 class CreateTransferGiftSerializer(CreateGiftSerializer):
     giver_name = serializers.CharField(max_length=120)
+    giver_email = serializers.EmailField(required=False, allow_blank=True)
     wishlist_item_id = serializers.UUIDField(required=False, allow_null=True)
 
 

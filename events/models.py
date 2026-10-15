@@ -85,6 +85,9 @@ class WishlistItem(models.Model):
     status = models.CharField(max_length=10, choices=Status.choices,
                               default=Status.AVAILABLE)
     reserved_by_name = models.CharField(max_length=120, blank=True)
+    reserved_by_email = models.EmailField(blank=True)
+    thank_you_message = models.TextField(blank=True)
+    thanked_at = models.DateTimeField(null=True, blank=True)
     reserved_show_name = models.BooleanField(default=True)
     reserved_at = models.DateTimeField(null=True, blank=True)
     # "Buy the gift" holds the item for HOLD_MINUTES so the guest can go buy
@@ -162,12 +165,16 @@ class WishlistItem(models.Model):
         """Back on the list (hold lapsed or cancelled, or the host undid it)."""
         self.status = self.Status.AVAILABLE
         self.reserved_by_name = ""
+        self.reserved_by_email = ""
+        self.thank_you_message = ""
+        self.thanked_at = None
         self.reserved_at = None
         self.reserved_until = None
         self.reserve_token = ""
         self.purchased_at = None
         self.owner_confirmed_at = None
-        self.save(update_fields=["status", "reserved_by_name", "reserved_at",
+        self.save(update_fields=["status", "reserved_by_name", "reserved_by_email",
+                                 "thank_you_message", "thanked_at", "reserved_at",
                                  "reserved_until", "reserve_token", "purchased_at",
                                  "owner_confirmed_at"])
 

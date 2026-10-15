@@ -99,6 +99,23 @@ class HostEventViewSet(viewsets.ModelViewSet):
         return response.Response(HostTransferGiftSerializer(gift).data)
 
     @decorators.action(detail=True, methods=["post"],
+                       url_path=r"transfers/(?P<gift_id>[0-9a-f-]{36})/thank-you")
+    def thank_transfer(self, request, pk=None, gift_id=None):
+        """Host emails a thank-you note to the guest behind a received gift."""
+        gift = self._transfer(pk, gift_id)
+        if gift is None:
+            return response.Response(status=status.HTTP_404_NOT_FOUND)
+        message = _thank_you_text(request)
+        if isinstance(message, response.Response):
+            return message
+        if gift.status != MonetaryGift.Status.PAID or not gift.giver_email:
+            return response.Response({"detail": "You can thank a guest once their gift is "
+                                                "received and they left an email."},
+                                     status=status.HTTP_409_CONFLICT)
+        from giving.services import send_gift_thank_you
+        return response.Response(HostTransferGiftSerializer(send_gift_thank_you(gift, message)).data)
+
+    @decorators.action(detail=True, methods=["post"],
                        url_path=r"transfers/(?P<gift_id>[0-9a-f-]{36})/decline")
     def decline_transfer(self, request, pk=None, gift_id=None):
         gift = self._transfer(pk, gift_id)
@@ -161,6 +178,17 @@ class _OwnedDetailViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin,
     permission_classes = [IsAuthenticated]
 
 
+def _thank_you_text(request):
+    message = (request.data.get("message") or "").strip()
+    if not message:
+        return response.Response({"message": ["Write a short thank-you message."]},
+                                 status=status.HTTP_400_BAD_REQUEST)
+    if len(message) > 2000:
+        return response.Response({"message": ["Keep it under 2,000 characters."]},
+                                 status=status.HTTP_400_BAD_REQUEST)
+    return message
+
+
 def _has_contributions(obj) -> bool:
     """Confirmed gifts, or transfers still waiting for the host to confirm."""
     return obj.gifts.filter(status__in=[MonetaryGift.Status.PAID,
@@ -205,6 +233,29 @@ class HostWishlistItemViewSet(_GiftHolderViewSet):
         if item.owner_confirmed_at is None:
             item.owner_confirmed_at = timezone.now()
             item.save(update_fields=["owner_confirmed_at"])
+            if item.reserved_by_email:
+                from accounts.emails import send_gift_received
+                from giving.services import _email_guest
+                _email_guest(send_gift_received, item.reserved_by_email, item.reserved_by_name,
+                             item.event, item.name)
+        return response.Response(self.get_serializer(item).data)
+
+    @decorators.action(detail=True, methods=["post"], url_path="thank-you")
+    def thank_you(self, request, pk=None):
+        """Host emails a thank-you note to the guest who bought this gift."""
+        item = self.get_object()
+        message = _thank_you_text(request)
+        if isinstance(message, response.Response):
+            return message
+        if item.purchased_at is None or not item.reserved_by_email:
+            return response.Response({"detail": "There's no guest email to thank for this gift."},
+                                     status=status.HTTP_409_CONFLICT)
+        item.thank_you_message = message
+        item.thanked_at = timezone.now()
+        item.save(update_fields=["thank_you_message", "thanked_at"])
+        from accounts.emails import send_thank_you
+        from giving.services import _email_guest
+        _email_guest(send_thank_you, item.reserved_by_email, item.reserved_by_name, item.event, message)
         return response.Response(self.get_serializer(item).data)
 
 

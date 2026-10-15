@@ -2,6 +2,8 @@ import logging
 import secrets
 from datetime import timedelta
 
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import viewsets, decorators, response, status
@@ -87,6 +89,7 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
             result = create_transfer_gift(
                 event=event, amount_kobo=data["amount_kobo"], goal=goal,
                 wishlist_item=item, giver_name=data["giver_name"].strip(),
+                giver_email=(data.get("giver_email") or "").strip().lower(),
                 message=data.get("message", ""),
                 show_name=data["show_name"], show_amount=data["show_amount"],
             )
@@ -146,6 +149,13 @@ class ReserveView(viewsets.ViewSet):
     permission_classes = [AllowAny]
 
     def create(self, request, item_id=None):
+        email = (request.data.get("guest_email") or "").strip().lower()
+        if email:
+            try:
+                validate_email(email)
+            except ValidationError:
+                return response.Response({"guest_email": ["Enter a valid email address."]},
+                                         status=status.HTTP_400_BAD_REQUEST)
         try:
             with transaction.atomic():
                 item = WishlistItem.objects.select_for_update().get(id=item_id)
@@ -163,12 +173,14 @@ class ReserveView(viewsets.ViewSet):
                 now = timezone.now()
                 item.status = WishlistItem.Status.RESERVED
                 item.reserved_by_name = (request.data.get("guest_name") or "").strip()[:120]
+                item.reserved_by_email = email
                 item.reserved_show_name = request.data.get("show_name", True)
                 item.reserved_at = now
                 item.reserved_until = now + timedelta(minutes=WishlistItem.HOLD_MINUTES)
                 item.reserve_token = secrets.token_urlsafe(24)
                 item.purchased_at = None
-                item.save(update_fields=["status", "reserved_by_name", "reserved_show_name",
+                item.save(update_fields=["status", "reserved_by_name", "reserved_by_email",
+                                         "reserved_show_name",
                                          "reserved_at", "reserved_until", "reserve_token",
                                          "purchased_at"])
         except WishlistItem.DoesNotExist:
