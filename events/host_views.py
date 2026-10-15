@@ -248,8 +248,9 @@ class InviteViewSet(mixins.ListModelMixin, mixins.CreateModelMixin,
                                  status=status.HTTP_201_CREATED)
 
 
-class HostPhotoViewSet(mixins.DestroyModelMixin, viewsets.GenericViewSet):
-    """Delete a gallery photo the host owns."""
+class HostPhotoViewSet(mixins.UpdateModelMixin, mixins.DestroyModelMixin,
+                       viewsets.GenericViewSet):
+    """Reorder (PATCH {order}) or delete a gallery photo the host owns."""
     serializer_class = EventPhotoSerializer
     permission_classes = [IsAuthenticated]
 

@@ -162,3 +162,33 @@ class BankTransferGiftTests(APITestCase):
         gift_id = self.start(goal_id=None, wishlist_item_id=str(self.item.id)).data["gift_id"]
         self.client.post(f"/api/host/events/{self.event.id}/transfers/{gift_id}/decline/")
         self.assertEqual(self.client.delete(f"/api/host/wishlist-items/{self.item.id}/").status_code, 204)
+
+
+class HostPhotoTests(APITestCase):
+    def setUp(self):
+        self.host = User.objects.create_user("photos@example.test", "pw-123456")
+        self.event = Event.objects.create(
+            host=self.host, slug="photos-1", title="#Photos", occasion="birthday",
+            starts_at=timezone.now() + timedelta(days=5), is_published=True)
+        token, _ = Token.objects.get_or_create(user=self.host)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+    def test_host_can_add_reorder_and_delete_photos(self):
+        base = f"/api/host/events/{self.event.id}/photos/"
+        a = self.client.post(base, {"image": "data:image/jpeg;base64,AAA", "order": 1}, format="json").data
+        b = self.client.post(base, {"image": "data:image/jpeg;base64,BBB", "order": 2}, format="json").data
+        self.client.patch(f"/api/host/photos/{b['id']}/", {"order": 0}, format="json")
+        public = self.client.get(f"/api/events/{self.event.slug}/").data["gallery"]
+        self.assertEqual(public, ["data:image/jpeg;base64,BBB", "data:image/jpeg;base64,AAA"])
+        self.assertEqual(self.client.delete(f"/api/host/photos/{a['id']}/").status_code, 204)
+        self.assertEqual(self.client.get(f"/api/events/{self.event.slug}/").data["gallery"],
+                         ["data:image/jpeg;base64,BBB"])
+
+    def test_another_host_cannot_touch_photos(self):
+        photo = self.client.post(f"/api/host/events/{self.event.id}/photos/",
+                                 {"image": "data:image/jpeg;base64,AAA"}, format="json").data
+        other = User.objects.create_user("intruder@example.test", "pw-123456")
+        token, _ = Token.objects.get_or_create(user=other)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        self.assertEqual(self.client.patch(f"/api/host/photos/{photo['id']}/", {"order": 9}, format="json").status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/host/photos/{photo['id']}/").status_code, 404)
