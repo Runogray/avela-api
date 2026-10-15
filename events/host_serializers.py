@@ -78,13 +78,16 @@ class HostEventSerializer(serializers.ModelSerializer):
     wishlist_items = HostWishlistItemSerializer(many=True, read_only=True)
     goals = HostContributionGoalSerializer(many=True, read_only=True)
     photos = EventPhotoSerializer(many=True, read_only=True)
+
+    def validate_cover_position(self, value):
+        return _clean_cover_position(value)
     rsvp_yes_count = serializers.SerializerMethodField()
     gift_total_kobo = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
         fields = ["id", "slug", "title", "description", "occasion", "category",
-                  "cover_image", "starts_at", "venue", "dress_code", "visibility",
+                  "cover_image", "cover_position", "starts_at", "venue", "dress_code", "visibility",
                   "accepts_money", "accepts_wishlist", "accepts_wishes",
                   "is_published", "created_at",
                   "wishlist_items", "goals", "photos", "rsvp_yes_count",
@@ -101,6 +104,19 @@ class HostEventSerializer(serializers.ModelSerializer):
         return agg["total"] or 0
 
 
+_POS = __import__("re").compile(r"^(\d{1,3}(?:\.\d+)?)% (\d{1,3}(?:\.\d+)?)%$")
+
+
+def _clean_cover_position(value: str) -> str:
+    """Accept "" (centre) or "X% Y%" with both in 0..100."""
+    if not value:
+        return ""
+    m = _POS.match(value.strip())
+    if not m or not all(0 <= float(v) <= 100 for v in m.groups()):
+        raise serializers.ValidationError('Use "X% Y%" with values from 0 to 100.')
+    return value.strip()
+
+
 class InviteEventSummarySerializer(serializers.ModelSerializer):
     """Compact event fields for an invite card (the invitee isn't the host)."""
     host_first_name = serializers.CharField(source="host.first_name", read_only=True)
@@ -109,7 +125,7 @@ class InviteEventSummarySerializer(serializers.ModelSerializer):
     class Meta:
         model = Event
         fields = ["id", "slug", "title", "occasion", "starts_at", "venue",
-                  "cover_image", "host_first_name", "wishlist_count"]
+                  "cover_image", "cover_position", "host_first_name", "wishlist_count"]
 
     def get_wishlist_count(self, obj) -> int:
         return obj.wishlist_items.count()

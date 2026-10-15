@@ -29,6 +29,9 @@ class Event(models.Model):
     # TextField (not URLField) so it can hold an uploaded image as a data URL
     # as well as an external URL (no media server in this build).
     cover_image = models.TextField(blank=True)
+    # Focus point for the cover as a CSS object-position ("50% 30%"), set by
+    # the host's "Adjust cover". Every frame crops around it. Blank = centre.
+    cover_position = models.CharField(max_length=20, blank=True, default="")
 
     starts_at = models.DateTimeField()
     venue = models.CharField(max_length=200, blank=True)

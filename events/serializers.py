@@ -48,7 +48,7 @@ class PublicEventSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Event
-        fields = ["id", "slug", "title", "description", "occasion", "cover_image",
+        fields = ["id", "slug", "title", "description", "occasion", "cover_image", "cover_position",
                   "starts_at", "venue", "dress_code", "host_verified",
                   "host_first_name",
                   "accepts_money", "accepts_wishlist", "accepts_wishes",

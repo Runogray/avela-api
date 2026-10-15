@@ -192,3 +192,25 @@ class HostPhotoTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
         self.assertEqual(self.client.patch(f"/api/host/photos/{photo['id']}/", {"order": 9}, format="json").status_code, 404)
         self.assertEqual(self.client.delete(f"/api/host/photos/{photo['id']}/").status_code, 404)
+
+
+class CoverPositionTests(APITestCase):
+    def setUp(self):
+        self.host = User.objects.create_user("cover@example.test", "pw-123456")
+        self.event = Event.objects.create(
+            host=self.host, slug="cover-1", title="#Cover", occasion="birthday",
+            starts_at=timezone.now() + timedelta(days=5), is_published=True,
+            cover_image="data:image/jpeg;base64,AAA")
+        token, _ = Token.objects.get_or_create(user=self.host)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+    def test_host_sets_focus_point_and_guests_get_it(self):
+        url = f"/api/host/events/{self.event.id}/"
+        self.assertEqual(self.client.patch(url, {"cover_position": "35% 20%"}, format="json").status_code, 200)
+        self.assertEqual(self.client.get(f"/api/events/{self.event.slug}/").data["cover_position"], "35% 20%")
+        self.assertEqual(self.client.patch(url, {"cover_position": ""}, format="json").status_code, 200)
+
+    def test_bad_focus_points_are_rejected(self):
+        url = f"/api/host/events/{self.event.id}/"
+        for bad in ("left top", "120% 0%", "50%", "50% 50%; background:red"):
+            self.assertEqual(self.client.patch(url, {"cover_position": bad}, format="json").status_code, 400, bad)
