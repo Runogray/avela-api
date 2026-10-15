@@ -14,6 +14,7 @@ Bank transfers: create_transfer_gift() records a pending gift with a short
 reference and returns the host's bank account for the guest to pay into.
 The money never touches Avela, so confirming one doesn't credit the wallet.
 """
+import logging
 import secrets
 
 from django.conf import settings
@@ -107,6 +108,13 @@ def mark_transfer_sent(gift: MonetaryGift) -> MonetaryGift:
     notify(gift.event.host, "contribution", "Confirm a transfer",
            f"{who} says they sent {naira(gift.amount_kobo)} for {gift.event.title} "
            f"(ref {gift.gateway_reference}). Confirm it once it's in your account.")
+    # And an email, so the host knows to check their bank even when they're
+    # not in the app. Best-effort: a mail hiccup never fails the guest's tap.
+    from accounts.emails import send_contribution_to_confirm
+    try:
+        send_contribution_to_confirm(gift)
+    except Exception:
+        logging.getLogger(__name__).exception("Couldn't email host about gift %s", gift.id)
     return gift
 
 

@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.core import mail
 from django.utils import timezone
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APITestCase
@@ -80,6 +81,31 @@ class BankTransferGiftTests(APITestCase):
         self.assertTrue(self.client.post(url).data["marked_sent"])
         self.client.post(url)
         self.assertEqual(Notification.objects.filter(user=self.host, title="Confirm a transfer").count(), 1)
+        # One email to the host, with what they need to check their bank.
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertEqual(email.to, ["host@example.test"])
+        self.assertEqual(email.subject, "Confirm a ₦10,000 gift from Tobi")
+        ref = MonetaryGift.objects.get(id=gift_id).gateway_reference
+        for expected in (ref, "Trip fund", "GTBank ••6789", f"/events/{self.event.id}"):
+            self.assertIn(expected, email.body)
+        html = email.alternatives[0][0]
+        self.assertIn("Review and confirm", html)
+        self.assertIn(ref, html)
+
+    def test_no_email_until_the_guest_says_they_sent_it(self):
+        self.add_bank()
+        self.start()
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_an_email_failure_never_breaks_the_guests_tap(self):
+        from unittest import mock
+        self.add_bank()
+        gift_id = self.start().data["gift_id"]
+        with mock.patch("accounts.emails.send_contribution_to_confirm", side_effect=RuntimeError("smtp down")):
+            res = self.client.post(f"{self.start_url}{gift_id}/sent/")
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.data["marked_sent"])
 
     def test_host_confirm_counts_toward_goal_but_not_the_wallet(self):
         self.add_bank()

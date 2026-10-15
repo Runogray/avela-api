@@ -86,6 +86,68 @@ def send_verification_code(user, code: str, ttl: int) -> None:
     _send(to=user.email, subject=f"{code} is your Avela verification code", text=text, html=html)
 
 
+def _naira(kobo: int) -> str:
+    """₦25,000 for whole amounts, ₦25,000.50 otherwise."""
+    value = kobo / 100
+    return f"₦{value:,.0f}" if kobo % 100 == 0 else f"₦{value:,.2f}"
+
+
+def send_contribution_to_confirm(gift) -> None:
+    """Tell the host a guest says they've transferred a cash gift, so they
+    check their bank and confirm (or decline) it in Avela."""
+    event = gift.event
+    host = event.host
+    if not host.email:
+        return
+    who = (gift.giver_name or "A guest").strip()
+    amount = _naira(gift.amount_kobo)
+    toward = (gift.goal.name if gift.goal_id else
+              gift.wishlist_item.name if gift.wishlist_item_id else "")
+    ref = gift.gateway_reference
+    bank = getattr(host, "bank_account", None)
+    account = f"{bank.bank_name} ••{bank.account_number[-4:]}" if bank else ""
+    url = f"{SITE_URL}/events/{event.id}"
+
+    rows = [("Amount", amount), ("From", who)]
+    if toward:
+        rows.append(("Toward", toward))
+    rows.append(("Reference", ref))
+    if account:
+        rows.append(("Paid into", account))
+    rows_html = "".join(
+        f'<tr><td style="padding:10px 0;border-bottom:1px solid #eef3f4;font-size:13px;color:{MUTED};">{escape(k)}</td>'
+        f'<td align="right" style="padding:10px 0;border-bottom:1px solid #eef3f4;font-size:15px;font-weight:600;'
+        f'color:{TEAL if k == "Reference" else INK};{"letter-spacing:1px;" if k == "Reference" else ""}">{escape(v)}</td></tr>'
+        for k, v in rows
+    )
+    intro = f"{who} says they've sent you {amount} for {event.title}."
+    check = (f"Check your bank account for a transfer with reference {ref}. "
+             "Confirm it once it has arrived, so it counts toward your gift totals.")
+
+    html = _layout(
+        preheader=f"{who} sent {amount}. Confirm it once it's in your account.",
+        body_html=f"""
+    <h1 style="margin:0 0 10px;font-size:22px;line-height:1.3;font-weight:600;letter-spacing:-0.5px;color:{INK};">Confirm a gift</h1>
+    <p style="margin:0 0 6px;font-size:15px;line-height:1.6;color:{INK};">{escape(_greeting(host))}</p>
+    <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:{MUTED};">{escape(intro)}</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;">{rows_html}</table>
+    <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:{MUTED};">{escape(check)}</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%"><tr><td align="center">
+      <a href="{url}" style="display:inline-block;background:{TEAL};color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:14px 28px;border-radius:50px;">Review and confirm</a>
+    </td></tr></table>
+    <hr style="border:0;border-top:1px solid #eef3f4;margin:28px 0 20px;">
+    <p style="margin:0;font-size:13px;line-height:1.6;color:#8a8a8a;">Didn't receive it? Open the gift in Avela and choose “Not received”.</p>""",
+    )
+    text = (
+        f"{_greeting(host)}\n\n{intro}\n\n"
+        + "".join(f"{k}: {v}\n" for k, v in rows)
+        + f"\n{check}\n\nReview and confirm: {url}\n\n"
+        "Didn't receive it? Open the gift in Avela and choose \"Not received\".\n\n"
+        f"The Avela team\n{SITE_URL}\n"
+    )
+    _send(to=host.email, subject=f"Confirm a {amount} gift from {who}", text=text, html=html)
+
+
 def send_password_reset_code(user, code: str, ttl: int) -> None:
     intro = "We received a request to reset your Avela password. Enter this code to choose a new one."
     outro = "If you didn't ask to reset your password, you can ignore this email. Your password won't change."
