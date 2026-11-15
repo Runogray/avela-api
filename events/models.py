@@ -95,6 +95,8 @@ class WishlistItem(models.Model):
     # good. An unconfirmed hold simply lapses and the item is free again.
     reserved_until = models.DateTimeField(null=True, blank=True)
     reserve_token = models.CharField(max_length=64, blank=True)
+    # Private link to the buying guest's gift page; set with the hold.
+    gift_token = models.CharField(max_length=40, blank=True, db_index=True)
     purchased_at = models.DateTimeField(null=True, blank=True)
     # The host confirmed the bought gift arrived (until then it's "pending").
     owner_confirmed_at = models.DateTimeField(null=True, blank=True)
@@ -171,11 +173,12 @@ class WishlistItem(models.Model):
         self.reserved_at = None
         self.reserved_until = None
         self.reserve_token = ""
+        self.gift_token = ""
         self.purchased_at = None
         self.owner_confirmed_at = None
         self.save(update_fields=["status", "reserved_by_name", "reserved_by_email",
                                  "thank_you_message", "thanked_at", "reserved_at",
-                                 "reserved_until", "reserve_token", "purchased_at",
+                                 "reserved_until", "reserve_token", "gift_token", "purchased_at",
                                  "owner_confirmed_at"])
 
 

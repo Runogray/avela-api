@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.urls import path, include
 
+from events.guest_gift import guest_gift
 from events.images import serve_image
 from rest_framework.routers import DefaultRouter
 
@@ -42,5 +43,6 @@ urlpatterns = [
          ReserveView.as_view({"post": "release_hold"}), name="reserve-release"),
     path("api/webhooks/payment/", payment_webhook, name="payment-webhook"),
     path("api/gifts/<uuid:gift_id>/status/", gift_status, name="gift-status"),
+    path("api/my-gifts/<str:token>/", guest_gift, name="guest-gift"),
     path("api/verify-nin/", verify_nin, name="verify-nin"),
 ]

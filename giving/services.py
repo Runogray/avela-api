@@ -126,6 +126,7 @@ def create_transfer_gift(*, event, amount_kobo, giver_name="", giver_email="", m
         show_name=show_name, show_amount=show_amount, is_crossing=crossing,
         method=MonetaryGift.Method.BANK_TRANSFER,
         gateway_reference=_transfer_reference(),
+        gift_token=secrets.token_urlsafe(18),
     )
     return {"gift": gift, "bank": bank}
 
@@ -171,12 +172,21 @@ def decline_transfer(gift: MonetaryGift) -> MonetaryGift:
     return gift
 
 
+def gift_page_url(token: str) -> str:
+    from accounts.emails import SITE_URL
+    return f"{SITE_URL}/gift/{token}" if token else ""
+
+
 def send_gift_thank_you(gift: MonetaryGift, message: str) -> MonetaryGift:
+    """The note always shows on the guest's gift page; it's emailed too when
+    they left an address."""
     gift.thank_you_message = message
     gift.thanked_at = timezone.now()
     gift.save(update_fields=["thank_you_message", "thanked_at"])
-    from accounts.emails import send_thank_you
-    _email_guest(send_thank_you, gift.giver_email, gift.giver_name, gift.event, message)
+    if gift.giver_email:
+        from accounts.emails import send_thank_you
+        _email_guest(send_thank_you, gift.giver_email, gift.giver_name, gift.event, message,
+                     gift_page_url(gift.gift_token))
     return gift
 
 
@@ -215,5 +225,5 @@ def confirm_gift(gift: MonetaryGift) -> MonetaryGift:
     elif gift.giver_email:
         from accounts.emails import send_gift_received
         _email_guest(send_gift_received, gift.giver_email, gift.giver_name, gift.event,
-                     f"your {naira_short(gift.amount_kobo)} gift")
+                     f"your {naira_short(gift.amount_kobo)} gift", gift_page_url(gift.gift_token))
     return gift

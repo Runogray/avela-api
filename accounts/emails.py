@@ -186,7 +186,7 @@ def _guest_greeting(name: str) -> str:
 
 
 def _simple(*, heading: str, greeting: str, paras: list[str], preheader: str,
-            quote: str = "") -> str:
+            quote: str = "", link: str = "", link_label: str = "View your gift") -> str:
     body = "".join(
         f'<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:{MUTED};">{escape(t)}</p>'
         for t in paras)
@@ -195,19 +195,28 @@ def _simple(*, heading: str, greeting: str, paras: list[str], preheader: str,
         body += (f'<blockquote style="margin:4px 0 20px;padding:16px 18px;background:#f0f8fa;'
                  f'border-radius:14px;font-size:15px;line-height:1.7;color:{INK};">'
                  f'{escape(quote).replace(chr(10), "<br>")}</blockquote>')
+    if link:
+        body += (f'<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:8px 0 4px;"><tr><td align="center">'
+                 f'<a href="{escape(link)}" style="display:inline-block;background:{TEAL};color:#ffffff;text-decoration:none;'
+                 f'font-size:15px;font-weight:600;padding:14px 28px;border-radius:50px;">{escape(link_label)}</a>'
+                 f'</td></tr></table>')
     return _layout(preheader=preheader, body_html=f"""
     <h1 style="margin:0 0 10px;font-size:22px;line-height:1.3;font-weight:600;letter-spacing:-0.5px;color:{INK};">{escape(heading)}</h1>
     <p style="margin:0 0 6px;font-size:15px;line-height:1.6;color:{INK};">{escape(greeting)}</p>
     {body}""")
 
 
-def send_gift_received(to: str, guest_name: str, event, what: str) -> None:
+def _link_text(link: str) -> str:
+    return f"See your gift and any thank-you note: {link}\n\n" if link else ""
+
+
+def send_gift_received(to: str, guest_name: str, event, what: str, link: str = "") -> None:
     """Guest: the host confirmed their gift arrived."""
     host = _host_name(event)
     line = f"{host} has received {what} for {event.title}. Thank you for making it special."
     html = _simple(heading="Your gift was received", greeting=_guest_greeting(guest_name),
-                   paras=[line], preheader=line)
-    text = f"{_guest_greeting(guest_name)}\n\n{line}\n\nThe Avela team\n{SITE_URL}\n"
+                   paras=[line], preheader=line, link=link)
+    text = f"{_guest_greeting(guest_name)}\n\n{line}\n\n{_link_text(link)}The Avela team\n{SITE_URL}\n"
     _send(to=to, subject=f"{host} received your gift", text=text, html=html)
 
 
@@ -222,20 +231,22 @@ def send_gift_not_received(gift) -> None:
         "If you sent it, check with your bank that it went through. If you haven't sent it yet, "
         "you can start a new gift from the invite link any time.",
     ]
+    link = f"{SITE_URL}/gift/{gift.gift_token}" if gift.gift_token else ""
     html = _simple(heading="Your transfer hasn't arrived", greeting=_guest_greeting(gift.giver_name),
-                   paras=lines, preheader=lines[0])
-    text = f"{_guest_greeting(gift.giver_name)}\n\n" + "\n\n".join(lines) + f"\n\nThe Avela team\n{SITE_URL}\n"
+                   paras=lines, preheader=lines[0], link=link)
+    text = (f"{_guest_greeting(gift.giver_name)}\n\n" + "\n\n".join(lines)
+            + f"\n\n{_link_text(link)}The Avela team\n{SITE_URL}\n")
     _send(to=gift.giver_email, subject=f"Your gift to {event.title} hasn't arrived yet", text=text, html=html)
 
 
-def send_thank_you(to: str, guest_name: str, event, message: str) -> None:
+def send_thank_you(to: str, guest_name: str, event, message: str, link: str = "") -> None:
     """Guest: a thank-you note written by the host."""
     host = _host_name(event)
     intro = f"{host} sent you a thank-you note for your gift to {event.title}."
     html = _simple(heading=f"A thank-you from {host}", greeting=_guest_greeting(guest_name),
-                   paras=[intro], quote=message, preheader=message[:90])
+                   paras=[intro], quote=message, preheader=message[:90], link=link)
     text = (f"{_guest_greeting(guest_name)}\n\n{intro}\n\n\"{message}\"\n\n— {host}\n\n"
-            f"The Avela team\n{SITE_URL}\n")
+            f"{_link_text(link)}The Avela team\n{SITE_URL}\n")
     _send(to=to, subject=f"A thank-you from {host}", text=text, html=html)
 
 

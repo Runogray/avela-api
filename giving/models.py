@@ -42,6 +42,8 @@ class MonetaryGift(models.Model):
     giver_email = models.EmailField(blank=True)
     thank_you_message = models.TextField(blank=True)
     thanked_at = models.DateTimeField(null=True, blank=True)
+    # Private link to the guest's gift page (avelaevent.com/gift/<token>).
+    gift_token = models.CharField(max_length=40, blank=True, db_index=True)
     show_name = models.BooleanField(default=True)
     show_amount = models.BooleanField(default=True)
 

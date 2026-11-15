@@ -105,6 +105,7 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
         gift, bank = result["gift"], result["bank"]
         return response.Response({
             "gift_id": str(gift.id),
+            "gift_token": gift.gift_token,
             "reference": gift.gateway_reference,
             "amount_kobo": gift.amount_kobo,
             "bank_name": bank.bank_name,
@@ -178,17 +179,19 @@ class ReserveView(viewsets.ViewSet):
                 item.reserved_at = now
                 item.reserved_until = now + timedelta(minutes=WishlistItem.HOLD_MINUTES)
                 item.reserve_token = secrets.token_urlsafe(24)
+                item.gift_token = secrets.token_urlsafe(18)
                 item.purchased_at = None
                 item.save(update_fields=["status", "reserved_by_name", "reserved_by_email",
                                          "reserved_show_name",
                                          "reserved_at", "reserved_until", "reserve_token",
-                                         "purchased_at"])
+                                         "gift_token", "purchased_at"])
         except WishlistItem.DoesNotExist:
             return response.Response({"detail": "Item not found."},
                                      status=status.HTTP_404_NOT_FOUND)
         data = WishlistItemSerializer(item).data
         # Only the guest holding it gets the token that confirms or cancels.
-        data.update(hold_token=item.reserve_token, reserved_until=item.reserved_until)
+        data.update(hold_token=item.reserve_token, reserved_until=item.reserved_until,
+                    gift_token=item.gift_token)
         return response.Response(data)
 
     def _held_by(self, request, item_id):

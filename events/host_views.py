@@ -108,9 +108,8 @@ class HostEventViewSet(viewsets.ModelViewSet):
         message = _thank_you_text(request)
         if isinstance(message, response.Response):
             return message
-        if gift.status != MonetaryGift.Status.PAID or not gift.giver_email:
-            return response.Response({"detail": "You can thank a guest once their gift is "
-                                                "received and they left an email."},
+        if gift.status != MonetaryGift.Status.PAID:
+            return response.Response({"detail": "You can thank a guest once their gift is received."},
                                      status=status.HTTP_409_CONFLICT)
         from giving.services import send_gift_thank_you
         return response.Response(HostTransferGiftSerializer(send_gift_thank_you(gift, message)).data)
@@ -235,9 +234,9 @@ class HostWishlistItemViewSet(_GiftHolderViewSet):
             item.save(update_fields=["owner_confirmed_at"])
             if item.reserved_by_email:
                 from accounts.emails import send_gift_received
-                from giving.services import _email_guest
+                from giving.services import _email_guest, gift_page_url
                 _email_guest(send_gift_received, item.reserved_by_email, item.reserved_by_name,
-                             item.event, item.name)
+                             item.event, item.name, gift_page_url(item.gift_token))
         return response.Response(self.get_serializer(item).data)
 
     @decorators.action(detail=True, methods=["post"], url_path="thank-you")
@@ -247,15 +246,17 @@ class HostWishlistItemViewSet(_GiftHolderViewSet):
         message = _thank_you_text(request)
         if isinstance(message, response.Response):
             return message
-        if item.purchased_at is None or not item.reserved_by_email:
-            return response.Response({"detail": "There's no guest email to thank for this gift."},
+        if item.purchased_at is None:
+            return response.Response({"detail": "Nobody has said they bought this gift yet."},
                                      status=status.HTTP_409_CONFLICT)
         item.thank_you_message = message
         item.thanked_at = timezone.now()
         item.save(update_fields=["thank_you_message", "thanked_at"])
-        from accounts.emails import send_thank_you
-        from giving.services import _email_guest
-        _email_guest(send_thank_you, item.reserved_by_email, item.reserved_by_name, item.event, message)
+        if item.reserved_by_email:
+            from accounts.emails import send_thank_you
+            from giving.services import _email_guest, gift_page_url
+            _email_guest(send_thank_you, item.reserved_by_email, item.reserved_by_name, item.event,
+                         message, gift_page_url(item.gift_token))
         return response.Response(self.get_serializer(item).data)
 
 

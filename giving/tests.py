@@ -486,16 +486,20 @@ class GuestEmailAndThankYouTests(_GiftFixtures):
         self.assertEqual(mail.outbox[0].to, ["tobi@example.test"])
         self.assertIn("hasn't arrived", mail.outbox[0].subject)
 
-    def test_no_guest_email_means_no_guest_mail_and_no_thank_you(self):
+    def test_no_guest_email_means_no_mail_but_the_thank_you_still_reaches_the_gift_page(self):
         self.add_bank()
-        gift_id = self.start().data["gift_id"]
+        started = self.start().data
         self.as_host()
         mail.outbox.clear()
-        self.client.post(f"/api/host/events/{self.event.id}/transfers/{gift_id}/confirm/")
+        self.client.post(f"/api/host/events/{self.event.id}/transfers/{started['gift_id']}/confirm/")
         self.assertEqual(mail.outbox, [])
-        res = self.client.post(f"/api/host/events/{self.event.id}/transfers/{gift_id}/thank-you/",
+        res = self.client.post(f"/api/host/events/{self.event.id}/transfers/{started['gift_id']}/thank-you/",
                                {"message": "Thanks"}, format="json")
-        self.assertEqual(res.status_code, 409)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(mail.outbox, [])
+        self.client.credentials()
+        page = self.client.get(f"/api/my-gifts/{started['gift_token']}/").data
+        self.assertEqual(page["thank_you_message"], "Thanks")
 
     def test_bad_guest_emails_are_rejected(self):
         self.add_bank()
@@ -523,3 +527,72 @@ class GuestEmailAndThankYouTests(_GiftFixtures):
         # Putting it back on the list clears the buyer's details.
         released = self.client.post(f"/api/host/wishlist-items/{self.item.id}/release/").data
         self.assertEqual(released["reserved_by_email"], "")
+
+
+class GuestGiftPageTests(_GiftFixtures):
+    """Each gift has a private page the guest can return to without an account."""
+
+    def page(self, token):
+        self.client.credentials()
+        return self.client.get(f"/api/my-gifts/{token}/")
+
+    def test_cash_gift_page_follows_the_gift_from_sent_to_thanked(self):
+        self.add_bank()
+        started = self.start(giver_email="tobi@example.test", wishlist_item_id=str(self.item.id),
+                             goal_id=None).data
+        token = started["gift_token"]
+        self.assertGreaterEqual(len(token), 20)
+        data = self.page(token).data
+        self.assertEqual((data["kind"], data["stage"], data["amount_kobo"]), ("cash", "started", 10_000_00))
+        self.assertEqual(data["item"]["name"], "Kettle")
+        self.assertEqual(data["event"]["title"], "#Amara30")
+        self.assertEqual(data["event"]["host_first_name"], "Amara")
+        self.client.post(f"/api/events/{self.event.slug}/transfers/{started['gift_id']}/sent/")
+        self.assertEqual(self.page(token).data["stage"], "sent")
+        self.as_host()
+        base = f"/api/host/events/{self.event.id}/transfers/{started['gift_id']}"
+        mail.outbox.clear()
+        self.client.post(f"{base}/confirm/")
+        self.assertIn(f"/gift/{token}", mail.outbox[0].body)
+        self.client.post(f"{base}/thank-you/", {"message": "Thank you Tobi!"}, format="json")
+        self.assertIn(f"/gift/{token}", mail.outbox[-1].body)
+        data = self.page(token).data
+        self.assertEqual(data["stage"], "received")
+        self.assertEqual(data["thank_you_message"], "Thank you Tobi!")
+        self.assertTrue(data["thanked_at"])
+
+    def test_declined_transfer_shows_as_not_received(self):
+        self.add_bank()
+        started = self.start().data
+        self.as_host()
+        self.client.post(f"/api/host/events/{self.event.id}/transfers/{started['gift_id']}/decline/")
+        self.assertEqual(self.page(started["gift_token"]).data["stage"], "not_received")
+
+    def test_bought_gift_page_and_thanks_without_an_email(self):
+        res = self.client.post(f"/api/wishlist-items/{self.item.id}/reserve/",
+                               {"guest_name": "Ada Obi"}, format="json").data
+        token = res["gift_token"]
+        self.assertEqual(self.page(token).data["stage"], "held")
+        self.client.post(f"/api/wishlist-items/{self.item.id}/bought/", {"hold_token": res["hold_token"]},
+                         format="json")
+        data = self.page(token).data
+        self.assertEqual((data["kind"], data["stage"], data["giver_name"]), ("item", "sent", "Ada Obi"))
+        self.as_host()
+        self.client.post(f"/api/host/wishlist-items/{self.item.id}/confirm-bought/")
+        thanked = self.client.post(f"/api/host/wishlist-items/{self.item.id}/thank-you/",
+                                   {"message": "Love it"}, format="json")
+        self.assertEqual(thanked.status_code, 200)
+        data = self.page(token).data
+        self.assertEqual((data["stage"], data["thank_you_message"]), ("received", "Love it"))
+        # Put back on the list: the old link no longer shows the gift.
+        self.as_host()
+        self.client.post(f"/api/host/wishlist-items/{self.item.id}/release/")
+        self.assertEqual(self.page(token).status_code, 404)
+
+    def test_tokens_are_private_and_unguessable(self):
+        self.assertEqual(self.page("short").status_code, 404)
+        self.assertEqual(self.page("x" * 24).status_code, 404)
+        self.add_bank()
+        # The public event never exposes gift tokens.
+        token = self.start().data["gift_token"]
+        self.assertNotIn(token, str(self.client.get(f"/api/events/{self.event.slug}/").data))
