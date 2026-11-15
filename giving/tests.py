@@ -636,10 +636,11 @@ class WellWishesTests(_GiftFixtures):
     def test_blank_or_overlong_wishes_are_rejected(self):
         self.assertEqual(self.send(guest_name="  ").status_code, 400)
         self.assertEqual(self.send(message="   ").status_code, 400)
-        self.assertEqual(self.send(message="x" * 2001).status_code, 400)
+        self.assertEqual(self.send(message="x" * 221).status_code, 400)
+        self.assertEqual(self.send(message="x" * 220).status_code, 201)
         self.assertEqual(self.send(guest_email="nope").status_code, 400)
         self.assertEqual(self.send(guest_email="").status_code, 201)
-        self.assertEqual(Wish.objects.count(), 1)
+        self.assertEqual(Wish.objects.count(), 2)
 
     def test_other_hosts_cannot_read_them(self):
         self.send()

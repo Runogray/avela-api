@@ -37,7 +37,8 @@ class WishSerializer(serializers.ModelSerializer):
     """A guest's well wishes for the host. The email is write-only."""
     guest_name = serializers.CharField(max_length=120)
     guest_email = serializers.EmailField(required=False, allow_blank=True, write_only=True)
-    message = serializers.CharField(max_length=2000)
+    # About six lines on the narrowest wish card in the app.
+    message = serializers.CharField(max_length=220)
 
     class Meta:
         model = Wish
