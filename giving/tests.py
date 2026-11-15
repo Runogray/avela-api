@@ -657,3 +657,44 @@ class WellWishesTests(_GiftFixtures):
         self.assertEqual(post("10.0.0.1").status_code, 429)
         # Another guest (a different address behind nginx) isn't affected.
         self.assertEqual(post("10.0.0.2").status_code, 201)
+
+
+class NotificationLinkTests(_GiftFixtures):
+    """Host notifications point at the gift they're about and can be read one by one."""
+
+    def test_transfer_notification_opens_its_gift_and_can_be_marked_read(self):
+        self.add_bank()
+        started = self.start().data
+        self.client.post(f"/api/events/{self.event.slug}/transfers/{started['gift_id']}/sent/")
+        self.as_host()
+        self.assertEqual(self.client.get("/api/notifications/unread_count/").data["unread"], 1)
+        n = self.client.get("/api/notifications/").data[0]
+        self.assertEqual(n["title"], "Confirm a transfer")
+        self.assertEqual(n["link"], f"/events/{self.event.id}?gift={self.goal.id}")
+        res = self.client.post(f"/api/notifications/{n['id']}/read/")
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.data["read_at"])
+        self.assertEqual(self.client.get("/api/notifications/unread_count/").data["unread"], 0)
+
+    def test_bought_gift_and_wish_notifications_link_to_the_right_place(self):
+        hold = self.client.post(f"/api/wishlist-items/{self.item.id}/reserve/",
+                                {"guest_name": "Ada"}, format="json").data["hold_token"]
+        self.client.post(f"/api/wishlist-items/{self.item.id}/bought/", {"hold_token": hold}, format="json")
+        from django.core.cache import cache
+        cache.clear()
+        self.client.post(f"/api/events/{self.event.slug}/wishes/",
+                         {"guest_name": "Ada", "message": "Hi"}, format="json")
+        links = dict(Notification.objects.filter(user=self.host).values_list("title", "link"))
+        self.assertEqual(links["Confirm a bought gift"], f"/events/{self.event.id}?gift={self.item.id}")
+        self.assertEqual(links["New well wishes"], f"/events/{self.event.id}#well-wishes")
+
+    def test_hosts_cannot_mark_someone_elses_notification(self):
+        self.add_bank()
+        started = self.start().data
+        self.client.post(f"/api/events/{self.event.slug}/transfers/{started['gift_id']}/sent/")
+        n = Notification.objects.get(user=self.host)
+        other = User.objects.create_user("other@example.test", "pw-123456")
+        self.as_host(other)
+        self.assertEqual(self.client.post(f"/api/notifications/{n.id}/read/").status_code, 404)
+        n.refresh_from_db()
+        self.assertIsNone(n.read_at)

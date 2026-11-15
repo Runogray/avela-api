@@ -16,5 +16,5 @@ def confirm_topup(topup: TopUp) -> TopUp:
 
     from accounts.services import notify
     notify(topup.wallet.host, "wallet", "Wallet funded",
-           f"{naira(topup.amount_kobo)} was added to your wallet.")
+           f"{naira(topup.amount_kobo)} was added to your wallet.", link="/wallet")
     return topup

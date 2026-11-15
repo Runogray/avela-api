@@ -35,7 +35,7 @@ class RegisterView(APIView):
         user = serializer.save()
         send_email_otp(user)  # kicks off email verification (best-effort)
         notify(user, "system", "Welcome to Avela 🎉",
-               "Create a celebration to start receiving gifts, RSVPs and good wishes.")
+               "Create a celebration to start receiving gifts, RSVPs and good wishes.", link="/create")
         return Response(_auth_payload(user), status=status.HTTP_201_CREATED)
 
 
@@ -204,6 +204,15 @@ class NotificationViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     def unread_count(self, request):
         n = request.user.notifications.filter(read_at__isnull=True).count()
         return Response({"unread": n})
+
+    @action(detail=True, methods=["post"])
+    def read(self, request, pk=None):
+        """POST /api/notifications/<id>/read/ — the host opened this one."""
+        n = self.get_object()
+        if n.read_at is None:
+            n.read_at = timezone.now()
+            n.save(update_fields=["read_at"])
+        return Response(self.get_serializer(n).data)
 
     @action(detail=False, methods=["post"], url_path="read-all")
     def read_all(self, request):

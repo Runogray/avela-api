@@ -316,7 +316,7 @@ class InviteViewSet(mixins.ListModelMixin, mixins.CreateModelMixin,
         if created:
             from accounts.services import notify
             notify(request.user, "invite", "Invite added",
-                   f"You joined {event.title}.")
+                   f"You joined {event.title}.", link="/invites")
         return response.Response(self.get_serializer(invite).data,
                                  status=status.HTTP_201_CREATED)
 

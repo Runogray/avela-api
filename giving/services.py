@@ -137,12 +137,12 @@ def mark_transfer_sent(gift: MonetaryGift) -> MonetaryGift:
         return gift
     gift.marked_sent_at = timezone.now()
     gift.save(update_fields=["marked_sent_at"])
-    from accounts.services import notify
-    from config.constants import naira
+    from accounts.services import gift_link, notify
     who = gift.giver_name or "A guest"
     notify(gift.event.host, "contribution", "Confirm a transfer",
-           f"{who} says they sent {naira(gift.amount_kobo)} for {gift.event.title} "
-           f"(ref {gift.gateway_reference}). Confirm it once it's in your account.")
+           f"{who} says they sent {naira_short(gift.amount_kobo)} for {gift.event.title} "
+           f"(ref {gift.gateway_reference}). Confirm it once it's in your account.",
+           link=gift_link(gift.event_id, gift.wishlist_item_id or gift.goal_id))
     # And an email, so the host knows to check their bank even when they're
     # not in the app. Best-effort: a mail hiccup never fails the guest's tap.
     from accounts.emails import send_contribution_to_confirm
@@ -217,11 +217,11 @@ def confirm_gift(gift: MonetaryGift) -> MonetaryGift:
         gift.goal.save(update_fields=["raised_kobo"])
 
     # Notify the host (lazy import avoids an accounts↔giving import cycle).
-    from accounts.services import notify
-    from config.constants import naira
+    from accounts.services import gift_link, notify
     if gift.method == MonetaryGift.Method.GATEWAY:
         notify(host, "contribution", "New contribution",
-               f"{gift.public_giver} sent {naira(gift.amount_kobo)} on {gift.event.title}.")
+               f"{gift.public_giver} sent {naira_short(gift.amount_kobo)} on {gift.event.title}.",
+               link=gift_link(gift.event_id, gift.wishlist_item_id or gift.goal_id))
     elif gift.giver_email:
         from accounts.emails import send_gift_received
         _email_guest(send_gift_received, gift.giver_email, gift.giver_name, gift.event,

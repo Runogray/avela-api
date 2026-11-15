@@ -189,6 +189,8 @@ class Notification(models.Model):
                             default=Kind.SYSTEM)
     title = models.CharField(max_length=140)
     body = models.TextField(blank=True)
+    # Where tapping it goes in the app (e.g. /events/<id>?gift=<item>), or "".
+    link = models.CharField(max_length=200, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     read_at = models.DateTimeField(null=True, blank=True)
 

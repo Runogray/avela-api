@@ -52,7 +52,8 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
         wish = ser.save(event=event)
         from accounts.services import notify
         notify(event.host, "wish", "New well wishes",
-               f"{wish.guest_name} left you a note on {event.title}.")
+               f"{wish.guest_name} left you a note on {event.title}.",
+               link=f"/events/{event.id}#well-wishes")
         return response.Response(ser.data, status=status.HTTP_201_CREATED)
 
     @decorators.action(detail=True, methods=["post"], url_path="gifts")
@@ -229,11 +230,12 @@ class ReserveView(viewsets.ViewSet):
             if item.purchased_at is None:
                 item.purchased_at = timezone.now()
                 item.save(update_fields=["purchased_at"])
-                from accounts.services import notify
+                from accounts.services import gift_link, notify
                 who = item.reserved_by_name or "A guest"
                 notify(item.event.host, "contribution", "Confirm a bought gift",
                        f"{who} says they bought {item.name} for {item.event.title}. "
-                       "Mark it as received once it arrives, or put it back on your list.")
+                       "Mark it as received once it arrives, or put it back on your list.",
+                       link=gift_link(item.event_id, item.id))
                 from accounts.emails import send_purchase_to_confirm
                 try:
                     send_purchase_to_confirm(item)

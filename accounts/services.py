@@ -5,9 +5,14 @@ from .emails import send_password_reset_code, send_verification_code
 from .models import EmailOTP, Notification
 
 
-def notify(user, kind: str, title: str, body: str = "") -> Notification:
-    """Create an in-app notification for `user`."""
-    return Notification.objects.create(user=user, kind=kind, title=title, body=body)
+def notify(user, kind: str, title: str, body: str = "", link: str = "") -> Notification:
+    """Create an in-app notification for `user`. `link` is the app path it opens."""
+    return Notification.objects.create(user=user, kind=kind, title=title, body=body, link=link)
+
+
+def gift_link(event_id, target_id=None) -> str:
+    """The host's event page, opened on one gift's contributions when given."""
+    return f"/events/{event_id}" + (f"?gift={target_id}" if target_id else "")
 
 
 def send_password_reset_otp(user) -> EmailOTP:

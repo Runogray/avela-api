@@ -118,7 +118,7 @@ class WithdrawalRequest(models.Model):
         from accounts.services import notify
         from config.constants import naira
         notify(host, "wallet", "Withdrawal successful",
-               f"{naira(q['net_kobo'])} is on its way to your bank.")
+               f"{naira(q['net_kobo'])} is on its way to your bank.", link="/wallet")
         return wr
 
 
