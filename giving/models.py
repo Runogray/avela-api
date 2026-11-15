@@ -70,6 +70,8 @@ class Wish(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="wishes")
     guest_name = models.CharField(max_length=120)
+    # For the host only (to reply or say thanks); never shown publicly.
+    guest_email = models.EmailField(blank=True)
     message = models.TextField()
 
     host_reply = models.TextField(blank=True)

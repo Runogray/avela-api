@@ -8,6 +8,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import viewsets, decorators, response, status
 from rest_framework.permissions import AllowAny
+from rest_framework.throttling import AnonRateThrottle
 
 from .models import Event, WishlistItem
 from .serializers import (PublicEventSerializer, RSVPSerializer,
@@ -18,6 +19,11 @@ from giving.serializers import (CreateGiftSerializer, CreateTransferGiftSerializ
 from giving.services import (create_gift, create_transfer_gift, mark_transfer_sent,
                              GiftBlocked, GiftUnavailable, NoBankAccount)
 from events.models import ContributionGoal
+
+
+class WishesThrottle(AnonRateThrottle):
+    """Caps how many well wishes one visitor can send (rate in settings)."""
+    scope = "wishes"
 
 
 class EventViewSet(viewsets.ReadOnlyModelViewSet):
@@ -37,12 +43,16 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
         ser.save(event=event)
         return response.Response(ser.data, status=status.HTTP_201_CREATED)
 
-    @decorators.action(detail=True, methods=["post"])
+    @decorators.action(detail=True, methods=["post"], throttle_classes=[WishesThrottle])
     def wishes(self, request, slug=None):
+        """Guest leaves well wishes; the host sees them on their event page."""
         event = self.get_object()
         ser = WishSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
-        ser.save(event=event)
+        wish = ser.save(event=event)
+        from accounts.services import notify
+        notify(event.host, "wish", "New well wishes",
+               f"{wish.guest_name} left you a note on {event.title}.")
         return response.Response(ser.data, status=status.HTTP_201_CREATED)
 
     @decorators.action(detail=True, methods=["post"], url_path="gifts")

@@ -8,7 +8,7 @@ from rest_framework.test import APITestCase
 from accounts.models import BankAccount, Notification, User
 from events.models import ContributionGoal, Event, EventPhoto, WishlistItem
 from wallet.models import Wallet
-from .models import MonetaryGift
+from .models import MonetaryGift, Wish
 
 
 class _GiftFixtures(APITestCase):
@@ -596,3 +596,63 @@ class GuestGiftPageTests(_GiftFixtures):
         # The public event never exposes gift tokens.
         token = self.start().data["gift_token"]
         self.assertNotIn(token, str(self.client.get(f"/api/events/{self.event.slug}/").data))
+
+
+class WellWishesTests(_GiftFixtures):
+    """Guests' well wishes reach the host, privately."""
+
+    def setUp(self):
+        super().setUp()
+        from django.core.cache import cache
+        cache.clear()  # throttle counts live in the cache
+        self.url = f"/api/events/{self.event.slug}/wishes/"
+
+    def send(self, **extra):
+        body = {"guest_name": "  Ada Obi ", "guest_email": "Ada@Example.test", "message": "Happy birthday!\nLove, Ada"}
+        body.update(extra)
+        return self.client.post(self.url, body, format="json")
+
+    def test_wish_is_stored_for_the_host_who_is_notified(self):
+        res = self.send()
+        self.assertEqual(res.status_code, 201)
+        self.assertNotIn("guest_email", res.data)  # never echoed back
+        wish = Wish.objects.get()
+        self.assertEqual((wish.guest_name, wish.guest_email), ("Ada Obi", "ada@example.test"))
+        note = Notification.objects.get(user=self.host)
+        self.assertEqual((note.kind, note.title), ("wish", "New well wishes"))
+        self.assertIn("Ada Obi", note.body)
+        self.as_host()
+        listed = self.client.get(f"/api/host/events/{self.event.id}/wishes/").data
+        self.assertEqual(listed[0]["guest_email"], "ada@example.test")
+        self.assertEqual(listed[0]["message"], "Happy birthday!\nLove, Ada")
+
+    def test_wishes_are_not_published_on_the_invite(self):
+        self.send()
+        data = self.client.get(f"/api/events/{self.event.slug}/").data
+        self.assertEqual(data["wishes"], [])
+        self.assertNotIn("Happy birthday", str(data))
+        self.assertNotIn("ada@example.test", str(data))
+
+    def test_blank_or_overlong_wishes_are_rejected(self):
+        self.assertEqual(self.send(guest_name="  ").status_code, 400)
+        self.assertEqual(self.send(message="   ").status_code, 400)
+        self.assertEqual(self.send(message="x" * 2001).status_code, 400)
+        self.assertEqual(self.send(guest_email="nope").status_code, 400)
+        self.assertEqual(self.send(guest_email="").status_code, 201)
+        self.assertEqual(Wish.objects.count(), 1)
+
+    def test_other_hosts_cannot_read_them(self):
+        self.send()
+        other = User.objects.create_user("other@example.test", "pw-123456")
+        self.as_host(other)
+        self.assertEqual(self.client.get(f"/api/host/events/{self.event.id}/wishes/").status_code, 404)
+
+    def test_each_visitor_is_limited_per_hour(self):
+        body = {"guest_name": "Ada", "message": "Hi"}
+        def post(ip):
+            return self.client.post(self.url, body, format="json", HTTP_X_FORWARDED_FOR=ip)
+        for _ in range(30):
+            self.assertEqual(post("10.0.0.1").status_code, 201)
+        self.assertEqual(post("10.0.0.1").status_code, 429)
+        # Another guest (a different address behind nginx) isn't affected.
+        self.assertEqual(post("10.0.0.2").status_code, 201)

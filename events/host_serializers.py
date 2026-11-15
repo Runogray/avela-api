@@ -78,9 +78,9 @@ class HostWishSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Wish
-        fields = ["id", "guest_name", "message", "host_reply", "is_hidden",
+        fields = ["id", "guest_name", "guest_email", "message", "host_reply", "is_hidden",
                   "created_at"]
-        read_only_fields = ["id", "guest_name", "message", "created_at"]
+        read_only_fields = ["id", "guest_name", "guest_email", "message", "created_at"]
 
 
 class HostEventSerializer(serializers.ModelSerializer):

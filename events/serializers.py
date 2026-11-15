@@ -67,10 +67,9 @@ class PublicEventSerializer(serializers.ModelSerializer):
         return [image_url(req, "photo", p.id, p.image) for p in obj.photos.all()]
 
     def get_wishes(self, obj):
-        # Local import avoids an import cycle (giving.models -> events.models).
-        from giving.serializers import WishSerializer
-        qs = obj.wishes.filter(is_hidden=False).order_by("-created_at")
-        return WishSerializer(qs, many=True).data
+        # Well wishes are notes to the host, read on their own page; they're
+        # not published to everyone with the invite link.
+        return []
 
     def get_recent_gifts(self, obj):
         from giving.models import MonetaryGift

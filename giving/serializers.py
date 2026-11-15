@@ -34,7 +34,27 @@ class PublicGiftSerializer(serializers.ModelSerializer):
 
 
 class WishSerializer(serializers.ModelSerializer):
+    """A guest's well wishes for the host. The email is write-only."""
+    guest_name = serializers.CharField(max_length=120)
+    guest_email = serializers.EmailField(required=False, allow_blank=True, write_only=True)
+    message = serializers.CharField(max_length=2000)
+
     class Meta:
         model = Wish
-        fields = ["id", "guest_name", "message", "host_reply", "created_at"]
+        fields = ["id", "guest_name", "guest_email", "message", "host_reply", "created_at"]
         read_only_fields = ["host_reply", "created_at"]
+
+    def validate_guest_name(self, v):
+        v = v.strip()
+        if not v:
+            raise serializers.ValidationError("Add your name.")
+        return v
+
+    def validate_guest_email(self, v):
+        return (v or "").strip().lower()
+
+    def validate_message(self, v):
+        v = v.strip()
+        if not v:
+            raise serializers.ValidationError("Write a message.")
+        return v
