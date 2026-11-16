@@ -117,6 +117,9 @@ class RSVPSerializer(serializers.ModelSerializer):
         if data.get("status") == RSVP.Status.NO:
             data["party_size"] = 1  # a "no" is one reply, not a headcount
         elif event is not None and data.get("party_size", 1) > event.rsvp_party_max:
-            raise serializers.ValidationError(
-                {"party_size": [f"You can reply for up to {event.rsvp_party_max} people."]})
+            extra = event.rsvp_party_max - 1
+            msg = ("This celebration doesn't have room for plus-ones." if extra == 0 else
+                   "You can bring a plus-one." if extra == 1 else
+                   f"You can bring up to {extra} plus-ones.")
+            raise serializers.ValidationError({"party_size": [msg]})
         return data

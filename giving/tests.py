@@ -823,7 +823,9 @@ class RsvpTests(_GiftFixtures):
     def test_party_size_is_capped_by_the_host_and_a_no_counts_once(self):
         self.event.rsvp_party_max = 2
         self.event.save(update_fields=["rsvp_party_max"])
-        self.assertEqual(self.reply(party_size=3).status_code, 400)
+        res = self.reply(party_size=3)
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.data["party_size"], ["You can bring a plus-one."])
         res = self.reply(status="no", party_size=9)
         self.assertEqual((res.status_code, res.data["party_size"]), (201, 1))
         self.assertEqual(self.reply(status="later").status_code, 400)
