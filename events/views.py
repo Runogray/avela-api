@@ -51,9 +51,12 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
         ser.is_valid(raise_exception=True)
         wish = ser.save(event=event)
         from accounts.services import notify
-        notify(event.host, "wish", "New well wishes",
-               f"{wish.guest_name} left you a note on {event.title}.",
-               link=f"/events/{event.id}#well-wishes")
+        # For a celebration of life, guests' notes are tributes.
+        if event.occasion == Event.Occasion.FAREWELL:
+            title, body = "New tribute", f"{wish.guest_name} left a tribute on {event.title}."
+        else:
+            title, body = "New well wishes", f"{wish.guest_name} left you a note on {event.title}."
+        notify(event.host, "wish", title, body, link=f"/events/{event.id}#well-wishes")
         return response.Response(ser.data, status=status.HTTP_201_CREATED)
 
     @decorators.action(detail=True, methods=["post"], url_path="gifts")

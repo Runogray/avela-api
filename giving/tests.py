@@ -741,3 +741,38 @@ class NotificationBackfillTests(_GiftFixtures):
         self.client.post(f"/api/events/{self.event.slug}/transfers/{started['gift_id']}/sent/")
         self.assertIn(f"/events/{self.event.id}?gift={self.goal.id}&amp;contribution={started['gift_id']}",
                       mail.outbox[0].alternatives[0][0])
+
+
+class OccasionTests(_GiftFixtures):
+    """Graduation and Farewell (a celebration of life) are occasions of their own."""
+
+    def test_hosts_can_create_graduation_and_farewell_events(self):
+        self.as_host()
+        for occasion in ("graduation", "farewell"):
+            res = self.client.post("/api/host/events/", {
+                "title": f"#{occasion}", "occasion": occasion,
+                "starts_at": (timezone.now() + timedelta(days=10)).isoformat(),
+            }, format="json")
+            self.assertEqual(res.status_code, 201, res.data)
+            self.assertEqual(res.data["occasion"], occasion)
+            self.assertEqual(Event.objects.get(id=res.data["id"]).occasion, occasion)
+
+    def test_unknown_occasions_are_still_rejected(self):
+        self.as_host()
+        res = self.client.post("/api/host/events/", {
+            "title": "#x", "occasion": "picnic",
+            "starts_at": (timezone.now() + timedelta(days=10)).isoformat(),
+        }, format="json")
+        self.assertEqual(res.status_code, 400)
+
+
+    def test_tributes_on_a_farewell_are_called_tributes(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.event.occasion = "farewell"
+        self.event.save(update_fields=["occasion"])
+        self.client.post(f"/api/events/{self.event.slug}/wishes/",
+                         {"guest_name": "Ada", "message": "She was so kind."}, format="json")
+        n = Notification.objects.get(user=self.host, kind="wish")
+        self.assertEqual(n.title, "New tribute")
+        self.assertIn("left a tribute", n.body)

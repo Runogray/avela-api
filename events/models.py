@@ -11,6 +11,8 @@ class Event(models.Model):
         WEDDING = "wedding", "Wedding"
         BIRTHDAY = "birthday", "Birthday"
         BABY_SHOWER = "baby_shower", "Baby shower"
+        GRADUATION = "graduation", "Graduation"
+        FAREWELL = "farewell", "Farewell"  # a celebration of life
 
     class Visibility(models.TextChoices):
         PUBLIC = "public", "Public (anyone with the link)"
