@@ -46,6 +46,10 @@ class Event(models.Model):
     accepts_money = models.BooleanField(default=True)
     accepts_wishlist = models.BooleanField(default=True)
     accepts_wishes = models.BooleanField(default=True)
+    # RSVP: guests say if they're attending (only asked when there's a venue).
+    rsvp_enabled = models.BooleanField(default=True)
+    # Most people one reply can bring, the guest included.
+    rsvp_party_max = models.PositiveSmallIntegerField(default=4)
 
     is_published = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -64,9 +68,17 @@ class RSVP(models.Model):
     event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="rsvps")
     guest_name = models.CharField(max_length=120)
     status = models.CharField(max_length=6, choices=Status.choices)
+    # How many people this reply covers, the guest included.
+    party_size = models.PositiveSmallIntegerField(default=1)
+    # Optional, for the host only (updates or reminders); never shown publicly.
+    guest_email = models.EmailField(blank=True)
+    guest_phone = models.CharField(max_length=30, blank=True)
+    # Private key the guest's device keeps so they can change their answer.
+    token = models.CharField(max_length=40, blank=True, db_index=True)
     # optional table assignment (P1 — kept simple as a nullable field, no model)
     table_number = models.PositiveIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class WishlistItem(models.Model):

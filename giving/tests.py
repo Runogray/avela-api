@@ -776,3 +776,73 @@ class OccasionTests(_GiftFixtures):
         n = Notification.objects.get(user=self.host, kind="wish")
         self.assertEqual(n.title, "New tribute")
         self.assertIn("left a tribute", n.body)
+
+
+class RsvpTests(_GiftFixtures):
+    """Guests say whether they're attending events that have a venue."""
+
+    def setUp(self):
+        super().setUp()
+        from django.core.cache import cache
+        cache.clear()
+        self.event.venue = "Eko Hotel, Lagos"
+        self.event.save(update_fields=["venue"])
+        self.url = f"/api/events/{self.event.slug}/rsvp/"
+
+    def reply(self, **extra):
+        body = {"guest_name": " Ada Obi ", "status": "yes", "party_size": 3,
+                "guest_email": "Ada@Example.test", "guest_phone": "0803 000 0000"}
+        body.update(extra)
+        return self.client.post(self.url, body, format="json")
+
+    def test_a_reply_is_saved_with_its_party_size_and_can_be_changed(self):
+        res = self.reply()
+        self.assertEqual(res.status_code, 201)
+        token = res.data["token"]
+        self.assertGreaterEqual(len(token), 20)
+        self.assertNotIn("guest_email", res.data)
+        from events.models import RSVP
+        r = RSVP.objects.get()
+        self.assertEqual((r.guest_name, r.status, r.party_size, r.guest_email),
+                         ("Ada Obi", "yes", 3, "ada@example.test"))
+        # Same device changes its mind: the same reply is updated.
+        res = self.reply(token=token, status="maybe", party_size=2)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(RSVP.objects.count(), 1)
+        self.assertEqual(RSVP.objects.get().status, "maybe")
+
+    def test_no_venue_or_switched_off_means_no_rsvps(self):
+        self.event.venue = ""
+        self.event.save(update_fields=["venue"])
+        self.assertEqual(self.reply().data["code"], "rsvp_closed")
+        self.event.venue = "Eko Hotel"
+        self.event.rsvp_enabled = False
+        self.event.save(update_fields=["venue", "rsvp_enabled"])
+        self.assertEqual(self.reply().status_code, 409)
+
+    def test_party_size_is_capped_by_the_host_and_a_no_counts_once(self):
+        self.event.rsvp_party_max = 2
+        self.event.save(update_fields=["rsvp_party_max"])
+        self.assertEqual(self.reply(party_size=3).status_code, 400)
+        res = self.reply(status="no", party_size=9)
+        self.assertEqual((res.status_code, res.data["party_size"]), (201, 1))
+        self.assertEqual(self.reply(status="later").status_code, 400)
+        self.assertEqual(self.reply(guest_name="  ").status_code, 400)
+
+    def test_host_sees_replies_and_settings_but_guests_dont(self):
+        self.reply()
+        public = self.client.get(f"/api/events/{self.event.slug}/").data
+        self.assertEqual((public["rsvp_enabled"], public["rsvp_party_max"], public["rsvp_yes_count"]), (True, 4, 1))
+        self.assertNotIn("ada@example.test", str(public))
+        self.as_host()
+        rows = self.client.get(f"/api/host/events/{self.event.id}/rsvps/").data
+        self.assertEqual((rows[0]["party_size"], rows[0]["guest_email"], rows[0]["guest_phone"]),
+                         (3, "ada@example.test", "0803 000 0000"))
+        res = self.client.patch(f"/api/host/events/{self.event.id}/", {"rsvp_party_max": 6, "rsvp_enabled": False},
+                                format="json")
+        self.assertEqual((res.status_code, res.data["rsvp_party_max"], res.data["rsvp_enabled"]), (200, 6, False))
+        self.assertEqual(self.client.patch(f"/api/host/events/{self.event.id}/", {"rsvp_party_max": 50},
+                                           format="json").status_code, 400)
+        other = User.objects.create_user("other@example.test", "pw-123456")
+        self.as_host(other)
+        self.assertEqual(self.client.get(f"/api/host/events/{self.event.id}/rsvps/").status_code, 404)

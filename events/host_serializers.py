@@ -69,8 +69,10 @@ class HostRSVPSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RSVP
-        fields = ["id", "guest_name", "status", "table_number", "created_at"]
-        read_only_fields = ["id", "guest_name", "status", "created_at"]
+        fields = ["id", "guest_name", "status", "party_size", "guest_email", "guest_phone",
+                  "table_number", "created_at", "updated_at"]
+        read_only_fields = ["id", "guest_name", "status", "party_size", "guest_email",
+                            "guest_phone", "created_at", "updated_at"]
 
 
 class HostWishSerializer(serializers.ModelSerializer):
@@ -100,6 +102,7 @@ class HostEventSerializer(serializers.ModelSerializer):
         fields = ["id", "slug", "title", "description", "occasion", "category",
                   "cover_image", "cover_position", "starts_at", "venue", "dress_code", "visibility",
                   "accepts_money", "accepts_wishlist", "accepts_wishes",
+                  "rsvp_enabled", "rsvp_party_max",
                   "is_published", "created_at",
                   "wishlist_items", "goals", "photos", "rsvp_yes_count",
                   "gift_total_kobo"]
@@ -108,6 +111,11 @@ class HostEventSerializer(serializers.ModelSerializer):
 
     def get_rsvp_yes_count(self, obj) -> int:
         return obj.rsvps.filter(status=RSVP.Status.YES).count()
+
+    def validate_rsvp_party_max(self, v):
+        if not 1 <= v <= 10:
+            raise serializers.ValidationError("Choose between 1 and 10 people per reply.")
+        return v
 
     def get_gift_total_kobo(self, obj) -> int:
         agg = (obj.gifts.filter(status=MonetaryGift.Status.PAID)

@@ -158,7 +158,7 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticatedOrReadOnly"],
     # Only views that opt in (e.g. WishesThrottle) are limited, per visitor. nginx
     # is the one proxy in front, so the visitor's IP is in X-Forwarded-For.
-    "DEFAULT_THROTTLE_RATES": {"wishes": "30/hour"},
+    "DEFAULT_THROTTLE_RATES": {"wishes": "30/hour", "rsvp": "30/hour"},
     "NUM_PROXIES": 1,
 }
 

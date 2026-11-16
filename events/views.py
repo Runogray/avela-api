@@ -21,6 +21,11 @@ from giving.services import (create_gift, create_transfer_gift, mark_transfer_se
 from events.models import ContributionGoal
 
 
+class RsvpThrottle(AnonRateThrottle):
+    """Caps how many RSVPs (or changes) one visitor can send (rate in settings)."""
+    scope = "rsvp"
+
+
 class WishesThrottle(AnonRateThrottle):
     """Caps how many well wishes one visitor can send (rate in settings)."""
     scope = "wishes"
@@ -35,13 +40,27 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [AllowAny]
     lookup_field = "slug"
 
-    @decorators.action(detail=True, methods=["post"])
+    @decorators.action(detail=True, methods=["post"], throttle_classes=[RsvpThrottle])
     def rsvp(self, request, slug=None):
+        """Guest says whether they're attending. Sending the `token` from an
+        earlier reply changes that reply instead of adding another."""
         event = self.get_object()
-        ser = RSVPSerializer(data=request.data)
+        if not event.venue.strip() or not event.rsvp_enabled:
+            return response.Response(
+                {"detail": "This celebration isn't taking RSVPs.", "code": "rsvp_closed"},
+                status=status.HTTP_409_CONFLICT)
+        token = (request.data.get("token") or "").strip()
+        existing = (event.rsvps.filter(token=token).first()
+                    if len(token) >= 16 else None)
+        ser = RSVPSerializer(existing, data=request.data, context={"event": event})
         ser.is_valid(raise_exception=True)
-        ser.save(event=event)
-        return response.Response(ser.data, status=status.HTTP_201_CREATED)
+        if existing:
+            rsvp = ser.save()
+            code = status.HTTP_200_OK
+        else:
+            rsvp = ser.save(event=event, token=secrets.token_urlsafe(18))
+            code = status.HTTP_201_CREATED
+        return response.Response({**ser.data, "token": rsvp.token}, status=code)
 
     @decorators.action(detail=True, methods=["post"], throttle_classes=[WishesThrottle])
     def wishes(self, request, slug=None):

@@ -60,7 +60,8 @@ class PublicEventSerializer(serializers.ModelSerializer):
                   "host_first_name",
                   "accepts_money", "accepts_wishlist", "accepts_wishes",
                   "wishlist_items", "goals", "wishes", "recent_gifts",
-                  "rsvp_yes_count", "gifts_paused", "gallery", "accepts_transfers"]
+                  "rsvp_yes_count", "rsvp_enabled", "rsvp_party_max",
+                  "gifts_paused", "gallery", "accepts_transfers"]
 
     def get_gallery(self, obj):
         req = self.context.get("request")
@@ -91,7 +92,31 @@ class PublicEventSerializer(serializers.ModelSerializer):
 
 
 class RSVPSerializer(serializers.ModelSerializer):
+    """A guest's reply. Email and phone go to the host only (write-only here)."""
+    guest_name = serializers.CharField(max_length=120)
+    party_size = serializers.IntegerField(min_value=1, max_value=20, default=1)
+    guest_email = serializers.EmailField(required=False, allow_blank=True, write_only=True)
+    guest_phone = serializers.CharField(required=False, allow_blank=True, max_length=30, write_only=True)
+
     class Meta:
         model = RSVP
-        fields = ["id", "guest_name", "status", "table_number"]
+        fields = ["id", "guest_name", "status", "party_size", "guest_email", "guest_phone", "table_number"]
         read_only_fields = ["table_number"]
+
+    def validate_guest_name(self, v):
+        v = v.strip()
+        if not v:
+            raise serializers.ValidationError("Add your name.")
+        return v
+
+    def validate_guest_email(self, v):
+        return (v or "").strip().lower()
+
+    def validate(self, data):
+        event = self.context.get("event")
+        if data.get("status") == RSVP.Status.NO:
+            data["party_size"] = 1  # a "no" is one reply, not a headcount
+        elif event is not None and data.get("party_size", 1) > event.rsvp_party_max:
+            raise serializers.ValidationError(
+                {"party_size": [f"You can reply for up to {event.rsvp_party_max} people."]})
+        return data
