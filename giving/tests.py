@@ -670,7 +670,8 @@ class NotificationLinkTests(_GiftFixtures):
         self.assertEqual(self.client.get("/api/notifications/unread_count/").data["unread"], 1)
         n = self.client.get("/api/notifications/").data[0]
         self.assertEqual(n["title"], "Confirm a transfer")
-        self.assertEqual(n["link"], f"/events/{self.event.id}?gift={self.goal.id}")
+        self.assertEqual(n["link"],
+                         f"/events/{self.event.id}?gift={self.goal.id}&contribution={started['gift_id']}")
         res = self.client.post(f"/api/notifications/{n['id']}/read/")
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.data["read_at"])
@@ -698,3 +699,45 @@ class NotificationLinkTests(_GiftFixtures):
         self.assertEqual(self.client.post(f"/api/notifications/{n.id}/read/").status_code, 404)
         n.refresh_from_db()
         self.assertIsNone(n.read_at)
+
+
+class NotificationBackfillTests(_GiftFixtures):
+    """Notifications from before links existed get one worked out from their words."""
+
+    def run_backfill(self):
+        from importlib import import_module
+        from django.apps import apps
+        import_module("accounts.migrations.0007_notification_link_backfill").backfill(apps, None)
+
+    def test_old_notifications_get_links_from_their_words(self):
+        self.add_bank()
+        started = self.start().data
+        gift = MonetaryGift.objects.get(id=started["gift_id"])
+        self.item.purchased_at = timezone.now()
+        self.item.save(update_fields=["purchased_at"])
+        mk = lambda kind, title, body: Notification.objects.create(user=self.host, kind=kind, title=title, body=body)
+        transfer = mk("contribution", "Confirm a transfer",
+                      f"Tobi says they sent ₦10,000.00 for {self.event.title} (ref {gift.gateway_reference}). "
+                      "Confirm it once it's in your account.")
+        bought = mk("contribution", "Confirm a bought gift",
+                    f"Ada says they bought Kettle for {self.event.title}. Mark it as received once it arrives, "
+                    "or put it back on your list.")
+        wish = mk("wish", "New well wishes", f"Ada left you a note on {self.event.title}.")
+        wallet = mk("wallet", "Wallet funded", "₦5,000 was added to your wallet.")
+        lost = mk("contribution", "Confirm a transfer", "Someone says they sent money (ref AV-NOPE99).")
+        self.run_backfill()
+        for n in (transfer, bought, wish, wallet, lost):
+            n.refresh_from_db()
+        self.assertEqual(transfer.link, f"/events/{self.event.id}?gift={self.goal.id}&contribution={gift.id}")
+        self.assertEqual(bought.link, f"/events/{self.event.id}?gift={self.item.id}")
+        self.assertEqual(wish.link, f"/events/{self.event.id}#well-wishes")
+        self.assertEqual(wallet.link, "/wallet")
+        self.assertEqual(lost.link, "")  # can't be matched: left alone
+
+    def test_host_email_button_opens_the_contribution(self):
+        self.add_bank()
+        started = self.start().data
+        mail.outbox.clear()
+        self.client.post(f"/api/events/{self.event.slug}/transfers/{started['gift_id']}/sent/")
+        self.assertIn(f"/events/{self.event.id}?gift={self.goal.id}&amp;contribution={started['gift_id']}",
+                      mail.outbox[0].alternatives[0][0])

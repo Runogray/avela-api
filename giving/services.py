@@ -142,7 +142,7 @@ def mark_transfer_sent(gift: MonetaryGift) -> MonetaryGift:
     notify(gift.event.host, "contribution", "Confirm a transfer",
            f"{who} says they sent {naira_short(gift.amount_kobo)} for {gift.event.title} "
            f"(ref {gift.gateway_reference}). Confirm it once it's in your account.",
-           link=gift_link(gift.event_id, gift.wishlist_item_id or gift.goal_id))
+           link=gift_link(gift.event_id, gift.wishlist_item_id or gift.goal_id, gift.id))
     # And an email, so the host knows to check their bank even when they're
     # not in the app. Best-effort: a mail hiccup never fails the guest's tap.
     from accounts.emails import send_contribution_to_confirm
@@ -221,7 +221,7 @@ def confirm_gift(gift: MonetaryGift) -> MonetaryGift:
     if gift.method == MonetaryGift.Method.GATEWAY:
         notify(host, "contribution", "New contribution",
                f"{gift.public_giver} sent {naira_short(gift.amount_kobo)} on {gift.event.title}.",
-               link=gift_link(gift.event_id, gift.wishlist_item_id or gift.goal_id))
+               link=gift_link(gift.event_id, gift.wishlist_item_id or gift.goal_id, gift.id))
     elif gift.giver_email:
         from accounts.emails import send_gift_received
         _email_guest(send_gift_received, gift.giver_email, gift.giver_name, gift.event,

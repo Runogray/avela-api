@@ -106,7 +106,9 @@ def send_contribution_to_confirm(gift) -> None:
     ref = gift.gateway_reference
     bank = getattr(host, "bank_account", None)
     account = f"{bank.bank_name} ••{bank.account_number[-4:]}" if bank else ""
-    url = f"{SITE_URL}/events/{event.id}"
+    from .services import gift_link
+    # Opens straight on this contribution, ready to confirm.
+    url = SITE_URL + gift_link(event.id, gift.wishlist_item_id or gift.goal_id, gift.id)
 
     rows = [("Amount", amount), ("From", who)]
     if toward:
@@ -133,7 +135,7 @@ def send_contribution_to_confirm(gift) -> None:
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;">{rows_html}</table>
     <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:{MUTED};">{escape(check)}</p>
     <table role="presentation" cellpadding="0" cellspacing="0" width="100%"><tr><td align="center">
-      <a href="{url}" style="display:inline-block;background:{TEAL};color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:14px 28px;border-radius:50px;">Review and confirm</a>
+      <a href="{escape(url)}" style="display:inline-block;background:{TEAL};color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:14px 28px;border-radius:50px;">Review and confirm</a>
     </td></tr></table>
     <hr style="border:0;border-top:1px solid #eef3f4;margin:28px 0 20px;">
     <p style="margin:0;font-size:13px;line-height:1.6;color:#8a8a8a;">Didn't receive it? Open the gift in Avela and choose “Not received”.</p>""",
@@ -156,7 +158,8 @@ def send_purchase_to_confirm(item) -> None:
     if not host.email:
         return
     who = (item.reserved_by_name or "A guest").strip()
-    url = f"{SITE_URL}/events/{event.id}"
+    from .services import gift_link
+    url = SITE_URL + gift_link(event.id, item.id)
     intro = f"{who} says they bought {item.name} for {event.title}."
     check = ("It's off your list for now so nobody buys it twice. Mark it as received once it "
              "arrives, or put it back on your list if it doesn't.")
@@ -168,7 +171,7 @@ def send_purchase_to_confirm(item) -> None:
     <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:{MUTED};">{escape(intro)}</p>
     <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:{MUTED};">{escape(check)}</p>
     <table role="presentation" cellpadding="0" cellspacing="0" width="100%"><tr><td align="center">
-      <a href="{url}" style="display:inline-block;background:{TEAL};color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:14px 28px;border-radius:50px;">Review the gift</a>
+      <a href="{escape(url)}" style="display:inline-block;background:{TEAL};color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:14px 28px;border-radius:50px;">Review the gift</a>
     </td></tr></table>""",
     )
     text = (f"{_greeting(host)}\n\n{intro}\n\n{check}\n\nReview the gift: {url}\n\n"

@@ -10,9 +10,15 @@ def notify(user, kind: str, title: str, body: str = "", link: str = "") -> Notif
     return Notification.objects.create(user=user, kind=kind, title=title, body=body, link=link)
 
 
-def gift_link(event_id, target_id=None) -> str:
-    """The host's event page, opened on one gift's contributions when given."""
-    return f"/events/{event_id}" + (f"?gift={target_id}" if target_id else "")
+def gift_link(event_id, target_id=None, contribution_id=None) -> str:
+    """The host's event page, opened on one gift's contributions when given,
+    with one contribution picked out (highlighted) when that's given too."""
+    link = f"/events/{event_id}"
+    if target_id:
+        link += f"?gift={target_id}"
+        if contribution_id:
+            link += f"&contribution={contribution_id}"
+    return link
 
 
 def send_password_reset_otp(user) -> EmailOTP:
