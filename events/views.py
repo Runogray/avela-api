@@ -132,6 +132,13 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
         if data.get("wishlist_item_id"):
             item = WishlistItem.objects.filter(id=data["wishlist_item_id"], event=event).first()
         from accounts.emails import SITE_URL
+        from django.conf import settings
+        # Paystack sends the guest back to the site they paid from, if it's one
+        # we already trust (the frontends allowed to call the API); never an
+        # arbitrary address someone passes in.
+        origin = (request.data.get("return_origin") or "").rstrip("/")
+        trusted = {o.rstrip("/") for o in settings.CORS_ALLOWED_ORIGINS} | {SITE_URL}
+        base = origin if origin in trusted else SITE_URL
         try:
             result = create_card_gift(
                 event=event, amount_kobo=data["amount_kobo"], goal=goal, wishlist_item=item,
@@ -140,7 +147,7 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
                 message=data.get("message", ""),
                 show_name=data["show_name"], show_amount=data["show_amount"],
                 # The guest comes back to their private gift page.
-                callback_url=f"{SITE_URL}/gift/{{token}}",
+                callback_url=f"{base}/gift/{{token}}",
             )
         except NoBankAccount as e:
             return response.Response({"detail": str(e), "code": "no_card_payments"},

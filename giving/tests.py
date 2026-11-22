@@ -911,6 +911,14 @@ class CardGiftTests(_GiftFixtures):
         self.assertEqual((res.data["fee_kobo"], res.data["total_kobo"]), (25_400, 1_025_400))
         token = res.data["gift_token"]
         self.assertIn(f"/gift/{token}?reference=stub_", res.data["checkout_url"])
+        self.assertTrue(res.data["checkout_url"].startswith("https://avelaevent.com/gift/"))
+        # A trusted frontend gets its guests back; anywhere else is ignored.
+        for origin, expect in (("http://localhost:3000", "http://localhost:3000/gift/"),
+                               ("https://evil.example", "https://avelaevent.com/gift/")):
+            again = self.client.post(f"/api/events/{self.event.slug}/card-gifts/", {
+                "amount_kobo": 100_000, "giver_name": "Tobi", "goal_id": str(self.goal.id),
+                "return_origin": origin}, format="json")
+            self.assertTrue(again.data["checkout_url"].startswith(expect), origin)
         gift = MonetaryGift.objects.get(id=res.data["gift_id"])
         self.assertEqual((gift.method, gift.status, gift.paid_direct), ("gateway", "initiated", True))
         # The guest comes back to their gift page: it checks with Paystack.
