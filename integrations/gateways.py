@@ -112,11 +112,20 @@ class PaystackGateway(PaymentGateway):
         req = request.Request(f"{self.BASE}{path}", data=data, method=method)
         req.add_header("Authorization", f"Bearer {self.secret}")
         req.add_header("Content-Type", "application/json")
+        # Paystack's firewall (Cloudflare 1010) rejects Python's default
+        # "Python-urllib" agent, so name ourselves.
+        req.add_header("User-Agent", "Avela/1.0 (+https://avelaevent.com)")
         try:
             with request.urlopen(req, timeout=20) as r:
                 return json.loads(r.read() or "{}")
         except error.HTTPError as e:
-            return json.loads(e.read() or "{}")
+            raw = e.read()
+            try:
+                return json.loads(raw or "{}")
+            except ValueError:
+                return {"status": False, "message": f"Paystack error {e.code}"}
+        except (error.URLError, TimeoutError, ValueError):
+            return {"status": False, "message": "Paystack unreachable"}
 
     def init_transaction(self, *, amount_kobo, email, metadata, subaccount="",
                          transaction_charge=None, callback_url="", channels=None):
