@@ -210,6 +210,9 @@ EMAIL_OTP_TTL_MINUTES = int(os.environ.get("EMAIL_OTP_TTL_MINUTES", "10"))
 # When PAYSTACK_SECRET_KEY is set, the payment webhook verifies the
 # X-Paystack-Signature header (HMAC-SHA512 of the raw body). Blank = stub/dev.
 PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY", "")
+# Webhook signing secret (whsec_…) for Paystack's Paystack-Signature header.
+# Without it, webhooks are checked with the older x-paystack-signature.
+PAYSTACK_WEBHOOK_SECRET = os.environ.get("PAYSTACK_WEBHOOK_SECRET", "")
 KYC_PROVIDER_KEY = os.environ.get("KYC_PROVIDER_KEY", "")
 
 

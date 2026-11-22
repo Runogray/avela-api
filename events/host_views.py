@@ -74,19 +74,25 @@ class HostEventViewSet(viewsets.ModelViewSet):
 
     @decorators.action(detail=True, methods=["get"])
     def transfers(self, request, pk=None):
-        """Bank-transfer gifts on this event, pending first, newest first."""
+        """Cash gifts on this event: bank transfers (pending first) and paid
+        card gifts, newest first."""
+        from django.db.models import Q
         event = self.get_object()
-        qs = (event.gifts.filter(method=MonetaryGift.Method.BANK_TRANSFER)
+        qs = (event.gifts.filter(Q(method=MonetaryGift.Method.BANK_TRANSFER)
+                                 | Q(method=MonetaryGift.Method.GATEWAY, status=MonetaryGift.Status.PAID))
               .exclude(status=MonetaryGift.Status.FAILED)
               .select_related("goal", "wishlist_item"))
         order = {MonetaryGift.Status.INITIATED: 0}
         rows = sorted(qs, key=lambda g: (order.get(g.status, 1), -g.created_at.timestamp()))
         return response.Response(HostTransferGiftSerializer(rows, many=True).data)
 
-    def _transfer(self, pk, gift_id):
+    def _transfer(self, pk, gift_id, *, card_too=False):
+        """A transfer gift on this event (or, for thanking, a card gift too)."""
         event = self.get_object()
-        return event.gifts.filter(
-            id=gift_id, method=MonetaryGift.Method.BANK_TRANSFER).first()
+        methods = [MonetaryGift.Method.BANK_TRANSFER]
+        if card_too:
+            methods.append(MonetaryGift.Method.GATEWAY)
+        return event.gifts.filter(id=gift_id, method__in=methods).first()
 
     @decorators.action(detail=True, methods=["post"],
                        url_path=r"transfers/(?P<gift_id>[0-9a-f-]{36})/confirm")
@@ -102,7 +108,7 @@ class HostEventViewSet(viewsets.ModelViewSet):
                        url_path=r"transfers/(?P<gift_id>[0-9a-f-]{36})/thank-you")
     def thank_transfer(self, request, pk=None, gift_id=None):
         """Host emails a thank-you note to the guest behind a received gift."""
-        gift = self._transfer(pk, gift_id)
+        gift = self._transfer(pk, gift_id, card_too=True)
         if gift is None:
             return response.Response(status=status.HTTP_404_NOT_FOUND)
         message = _thank_you_text(request)

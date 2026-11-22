@@ -40,8 +40,12 @@ def _cash(request, gift: MonetaryGift) -> dict:
         stage = "not_received"
     else:
         stage = "sent" if gift.marked_sent_at else "started"
+    if gift.method == MonetaryGift.Method.GATEWAY and gift.status == MonetaryGift.Status.INITIATED:
+        stage = "paying"  # left for the payment page and hasn't paid (yet)
     return {
         "kind": "cash",
+        "method": "card" if gift.method == MonetaryGift.Method.GATEWAY else "transfer",
+        "fee_kobo": gift.fee_kobo,
         "stage": stage,
         "giver_name": gift.giver_name,
         "amount_kobo": gift.amount_kobo,
@@ -50,7 +54,8 @@ def _cash(request, gift: MonetaryGift) -> dict:
         "goal": ({"id": str(gift.goal.id), "name": gift.goal.name} if gift.goal else None),
         "event": _event(request, gift.event),
         "created_at": gift.created_at,
-        "sent_at": gift.marked_sent_at,
+        # A card gift is "sent" the moment it's paid.
+        "sent_at": gift.marked_sent_at or (gift.paid_at if gift.method == MonetaryGift.Method.GATEWAY else None),
         "received_at": gift.paid_at,
         "thank_you_message": gift.thank_you_message,
         "thanked_at": gift.thanked_at,
@@ -87,6 +92,11 @@ def guest_gift(request, token):
     gift = (MonetaryGift.objects.select_related("event__host", "wishlist_item", "goal")
             .filter(gift_token=token).first())
     if gift is not None:
+        # Back from paying by card: check with the gateway now rather than
+        # waiting for its webhook, so the guest sees "Received" straight away.
+        if gift.method == MonetaryGift.Method.GATEWAY and gift.status == MonetaryGift.Status.INITIATED:
+            from giving.services import settle_card_gift
+            gift = settle_card_gift(gift)
         return response.Response(_cash(request, gift))
     item = (WishlistItem.objects.select_related("event__host")
             .filter(gift_token=token).first())

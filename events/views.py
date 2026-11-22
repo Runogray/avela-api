@@ -16,8 +16,9 @@ from .serializers import (PublicEventSerializer, RSVPSerializer,
 from giving.models import MonetaryGift, Wish
 from giving.serializers import (CreateGiftSerializer, CreateTransferGiftSerializer,
                                 PublicGiftSerializer, WishSerializer)
-from giving.services import (create_gift, create_transfer_gift, mark_transfer_sent,
-                             GiftBlocked, GiftUnavailable, NoBankAccount)
+from giving.services import (card_fee_kobo, create_card_gift, create_gift, create_transfer_gift,
+                             mark_transfer_sent, GiftBlocked, GiftUnavailable, NoBankAccount,
+                             PaymentUnavailable)
 from events.models import ContributionGoal
 
 
@@ -104,6 +105,61 @@ class EventViewSet(viewsets.ReadOnlyModelViewSet):
              "checkout_url": result["checkout_url"]},
             status=status.HTTP_201_CREATED)
 
+
+    @decorators.action(detail=True, methods=["get"], url_path="card-fee")
+    def card_fee(self, request, slug=None):
+        """What a card gift of `amount_kobo` costs the guest (gift + fee)."""
+        try:
+            amount = int(request.query_params.get("amount_kobo", "0"))
+        except ValueError:
+            amount = 0
+        if amount <= 0:
+            return response.Response({"detail": "Enter an amount."}, status=status.HTTP_400_BAD_REQUEST)
+        fee = card_fee_kobo(amount)
+        return response.Response({"amount_kobo": amount, "fee_kobo": fee, "total_kobo": amount + fee})
+
+    @decorators.action(detail=True, methods=["post"], url_path="card-gifts")
+    def start_card_gift(self, request, slug=None):
+        """Guest pays by card, USSD or bank on Paystack: returns where to pay.
+        The gift settles straight to the host's bank; the guest pays the fee."""
+        event = self.get_object()
+        ser = CreateTransferGiftSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+        goal = item = None
+        if data.get("goal_id"):
+            goal = ContributionGoal.objects.filter(id=data["goal_id"], event=event).first()
+        if data.get("wishlist_item_id"):
+            item = WishlistItem.objects.filter(id=data["wishlist_item_id"], event=event).first()
+        from accounts.emails import SITE_URL
+        try:
+            result = create_card_gift(
+                event=event, amount_kobo=data["amount_kobo"], goal=goal, wishlist_item=item,
+                giver_name=data["giver_name"].strip(),
+                giver_email=(data.get("giver_email") or "").strip().lower(),
+                message=data.get("message", ""),
+                show_name=data["show_name"], show_amount=data["show_amount"],
+                # The guest comes back to their private gift page.
+                callback_url=f"{SITE_URL}/gift/{{token}}",
+            )
+        except NoBankAccount as e:
+            return response.Response({"detail": str(e), "code": "no_card_payments"},
+                                     status=status.HTTP_409_CONFLICT)
+        except GiftUnavailable as e:
+            return response.Response({"detail": str(e), "code": e.code}, status=status.HTTP_409_CONFLICT)
+        except GiftBlocked as e:
+            return response.Response({"detail": str(e), "code": "host_capped"},
+                                     status=status.HTTP_409_CONFLICT)
+        except PaymentUnavailable as e:
+            return response.Response({"detail": str(e), "code": "gateway_unavailable"},
+                                     status=status.HTTP_502_BAD_GATEWAY)
+        gift = result["gift"]
+        return response.Response({
+            "gift_id": str(gift.id), "gift_token": gift.gift_token,
+            "amount_kobo": gift.amount_kobo, "fee_kobo": gift.fee_kobo,
+            "total_kobo": gift.amount_kobo + gift.fee_kobo,
+            "checkout_url": result["checkout_url"],
+        }, status=status.HTTP_201_CREATED)
 
     @decorators.action(detail=True, methods=["post"], url_path="transfers")
     def start_transfer(self, request, slug=None):

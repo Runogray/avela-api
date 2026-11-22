@@ -34,6 +34,11 @@ class MonetaryGift(models.Model):
                               default=Method.GATEWAY)
 
     amount_kobo = models.BigIntegerField()
+    # Card gifts: the gateway fee the guest paid on top (they paid amount + fee).
+    fee_kobo = models.BigIntegerField(default=0)
+    # Settled straight into the host's bank (Paystack subaccount), so it never
+    # touches the Avela wallet.
+    paid_direct = models.BooleanField(default=False)
     message = models.TextField(blank=True)
 
     giver_name = models.CharField(max_length=120, blank=True)

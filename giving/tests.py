@@ -848,3 +848,133 @@ class RsvpTests(_GiftFixtures):
         other = User.objects.create_user("other@example.test", "pw-123456")
         self.as_host(other)
         self.assertEqual(self.client.get(f"/api/host/events/{self.event.id}/rsvps/").status_code, 404)
+
+
+from django.test import override_settings
+
+
+@override_settings(PAYSTACK_SECRET_KEY="sk_test_avela", PAYSTACK_WEBHOOK_SECRET="")
+class CardGiftTests(_GiftFixtures):
+    """Guests pay by card on Paystack; it settles straight to the host's bank."""
+
+    def setUp(self):
+        super().setUp()
+        self.as_host()
+        res = self.client.put("/api/wallet/bank-account/", {
+            "bank_name": "Guaranty Trust Bank", "bank_code": "058", "account_number": "0123456789"},
+            format="json")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.client.credentials()
+
+    def test_fee_covers_paystack_so_the_host_gets_the_whole_gift(self):
+        from giving.services import card_fee_kobo, gateway_fee_kobo
+        self.assertEqual(card_fee_kobo(1_000_000), 25_400)      # ₦10,000 → ₦254 fee
+        self.assertEqual(card_fee_kobo(100_000), 1_600)         # ₦1,000 → ₦16 (no ₦100 under ₦2,500)
+        self.assertEqual(card_fee_kobo(20_000_000), 200_000)    # ₦200,000 → capped at ₦2,000
+        for naira in list(range(100, 5_000, 7)) + [2_460, 2_470, 2_500, 150_000, 1_000_000]:
+            gift = naira * 100
+            fee = card_fee_kobo(gift)
+            total = gift + fee
+            self.assertEqual(total % 100, 0, naira)               # whole naira for the guest
+            self.assertGreaterEqual(fee, gateway_fee_kobo(total), naira)  # Avela never loses
+            self.assertLess(fee - gateway_fee_kobo(total), 200, naira)    # and keeps < ₦2 extra
+
+    def test_bank_details_are_looked_up_and_set_up_for_card_gifts(self):
+        from accounts.models import BankAccount
+        bank = BankAccount.objects.get(user=self.host)
+        self.assertEqual((bank.bank_code, bank.account_name), ("058", "TEST ACCOUNT HOLDER"))
+        self.assertTrue(bank.paystack_subaccount.startswith("ACCT_"))
+        first = bank.paystack_subaccount
+        self.as_host()
+        # Re-saving the same account keeps its subaccount; a typo is refused.
+        self.client.put("/api/wallet/bank-account/", {
+            "bank_name": "Guaranty Trust Bank", "bank_code": "058", "account_number": "0123456789"}, format="json")
+        self.assertEqual(BankAccount.objects.get(user=self.host).paystack_subaccount, first)
+        self.assertEqual(self.client.put("/api/wallet/bank-account/", {
+            "bank_name": "GTBank", "bank_code": "058", "account_number": "12345"}, format="json").status_code, 400)
+        self.assertEqual(self.client.put("/api/wallet/bank-account/", {
+            "bank_name": "Nowhere", "bank_code": "999", "account_number": "0123456789"}, format="json").status_code, 400)
+        res = self.client.post("/api/wallet/resolve-account/", {"bank_code": "058", "account_number": "0123456789"},
+                               format="json")
+        self.assertEqual(res.data["account_name"], "TEST ACCOUNT HOLDER")
+        self.assertTrue(any(b["code"] == "058" for b in self.client.get("/api/wallet/banks/").data))
+
+    def test_card_gift_from_checkout_to_received(self):
+        public = self.client.get(f"/api/events/{self.event.slug}/").data
+        self.assertTrue(public["accepts_card"])
+        quote = self.client.get(f"/api/events/{self.event.slug}/card-fee/?amount_kobo=1000000").data
+        self.assertEqual(quote["total_kobo"], 1_025_400)
+        res = self.client.post(f"/api/events/{self.event.slug}/card-gifts/", {
+            "amount_kobo": 1_000_000, "giver_name": "Tobi", "giver_email": "tobi@example.test",
+            "goal_id": str(self.goal.id)}, format="json")
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual((res.data["fee_kobo"], res.data["total_kobo"]), (25_400, 1_025_400))
+        token = res.data["gift_token"]
+        self.assertIn(f"/gift/{token}?reference=stub_", res.data["checkout_url"])
+        gift = MonetaryGift.objects.get(id=res.data["gift_id"])
+        self.assertEqual((gift.method, gift.status, gift.paid_direct), ("gateway", "initiated", True))
+        # The guest comes back to their gift page: it checks with Paystack.
+        mail.outbox.clear()
+        page = self.client.get(f"/api/my-gifts/{token}/").data
+        self.assertEqual((page["stage"], page["method"], page["fee_kobo"]), ("received", "card", 25_400))
+        gift.refresh_from_db()
+        self.assertEqual(gift.status, "paid")
+        self.goal.refresh_from_db()
+        self.assertEqual(self.goal.raised_kobo, 1_000_000)
+        # Straight to the host's bank: the Avela wallet is never credited.
+        self.assertFalse(Wallet.objects.filter(host=self.host, pending_kobo__gt=0).exists())
+        note = Notification.objects.get(user=self.host, title="New gift")
+        self.assertIn("by card", note.body)
+        self.assertEqual(mail.outbox[0].to, ["tobi@example.test"])
+        # The host sees it beside transfers and can thank the guest.
+        self.as_host()
+        rows = self.client.get(f"/api/host/events/{self.event.id}/transfers/").data
+        self.assertEqual([(r["method"], r["status"]) for r in rows], [("gateway", "paid")])
+        self.assertEqual(self.client.post(f"/api/host/events/{self.event.id}/transfers/{gift.id}/thank-you/",
+                                          {"message": "Thanks!"}, format="json").status_code, 200)
+        # A host can't "confirm" a card gift by hand.
+        self.assertEqual(self.client.post(
+            f"/api/host/events/{self.event.id}/transfers/{gift.id}/confirm/").status_code, 404)
+
+    def test_no_subaccount_means_no_card_gifts(self):
+        from accounts.models import BankAccount
+        BankAccount.objects.filter(user=self.host).update(paystack_subaccount="")
+        self.assertFalse(self.client.get(f"/api/events/{self.event.slug}/").data["accepts_card"])
+        res = self.client.post(f"/api/events/{self.event.slug}/card-gifts/", {
+            "amount_kobo": 500_000, "giver_name": "Tobi", "goal_id": str(self.goal.id)}, format="json")
+        self.assertEqual(res.data["code"], "no_card_payments")
+
+    def start_gift(self):
+        return self.client.post(f"/api/events/{self.event.slug}/card-gifts/", {
+            "amount_kobo": 500_000, "giver_name": "Tobi", "goal_id": str(self.goal.id)}, format="json").data
+
+    def test_webhook_with_the_older_signature(self):
+        import hashlib, hmac, json
+        ref = MonetaryGift.objects.get(id=self.start_gift()["gift_id"]).gateway_reference
+        body = json.dumps({"event": "charge.success", "data": {"reference": ref}}).encode()
+        sig = hmac.new(b"sk_test_avela", body, hashlib.sha512).hexdigest()
+        post = lambda s: self.client.post("/api/webhooks/payment/", body, content_type="application/json",
+                                          HTTP_X_PAYSTACK_SIGNATURE=s)
+        self.assertEqual(post("0" * 128).status_code, 401)
+        self.assertEqual(post(sig).status_code, 200)
+        self.assertEqual(MonetaryGift.objects.get(gateway_reference=ref).status, "paid")
+        # Other events and unknown references are acknowledged, not retried.
+        other = json.dumps({"event": "transfer.success", "data": {"reference": "x"}}).encode()
+        self.assertEqual(self.client.post("/api/webhooks/payment/", other, content_type="application/json",
+                                          HTTP_X_PAYSTACK_SIGNATURE=hmac.new(b"sk_test_avela", other, hashlib.sha512).hexdigest()).status_code, 200)
+
+    @override_settings(PAYSTACK_WEBHOOK_SECRET="whsec_test")
+    def test_webhook_with_the_new_signature(self):
+        import hashlib, hmac, json, time
+        ref = MonetaryGift.objects.get(id=self.start_gift()["gift_id"]).gateway_reference
+        body = json.dumps({"event": "charge.success", "data": {"reference": ref}}).encode()
+        def header(t, secret=b"whsec_test"):
+            sig = hmac.new(secret, f"{t}.".encode() + body, hashlib.sha512).hexdigest()
+            return f"t={t},v1=whk_abc:{sig}"
+        post = lambda h: self.client.post("/api/webhooks/payment/", body, content_type="application/json",
+                                          HTTP_PAYSTACK_SIGNATURE=h)
+        now = int(time.time())
+        self.assertEqual(post(header(now - 1000)).status_code, 401)      # stale: replay refused
+        self.assertEqual(post(header(now, b"whsec_wrong")).status_code, 401)
+        self.assertEqual(post(header(now)).status_code, 200)
+        self.assertEqual(MonetaryGift.objects.get(gateway_reference=ref).status, "paid")

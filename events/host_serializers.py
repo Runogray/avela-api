@@ -167,7 +167,7 @@ class HostTransferGiftSerializer(serializers.ModelSerializer):
     class Meta:
         model = MonetaryGift
         fields = ["id", "giver_name", "giver_email", "thanked_at", "thank_you_message",
-                  "amount_kobo", "reference", "status",
+                  "amount_kobo", "reference", "status", "method",
                   "goal_id", "wishlist_item_id", "for_name", "message",
                   "marked_sent_at", "created_at", "paid_at"]
         read_only_fields = fields

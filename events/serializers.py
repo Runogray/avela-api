@@ -52,6 +52,7 @@ class PublicEventSerializer(serializers.ModelSerializer):
     # The host has a bank account, so guests can pay cash gifts by transfer.
     # (The account itself is only revealed once a guest starts a gift.)
     accepts_transfers = serializers.SerializerMethodField()
+    accepts_card = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
@@ -61,7 +62,7 @@ class PublicEventSerializer(serializers.ModelSerializer):
                   "accepts_money", "accepts_wishlist", "accepts_wishes",
                   "wishlist_items", "goals", "wishes", "recent_gifts",
                   "rsvp_yes_count", "rsvp_enabled", "rsvp_party_max",
-                  "gifts_paused", "gallery", "accepts_transfers"]
+                  "gifts_paused", "gallery", "accepts_transfers", "accepts_card"]
 
     def get_gallery(self, obj):
         req = self.context.get("request")
@@ -84,6 +85,12 @@ class PublicEventSerializer(serializers.ModelSerializer):
 
     def get_accepts_transfers(self, obj) -> bool:
         return hasattr(obj.host, "bank_account")
+
+    def get_accepts_card(self, obj) -> bool:
+        """Guests can pay by card when the host's bank has a Paystack subaccount."""
+        from integrations.gateways import card_payments_enabled
+        bank = getattr(obj.host, "bank_account", None)
+        return bool(bank and bank.paystack_subaccount) and card_payments_enabled()
 
     def get_gifts_paused(self, obj):
         """A3: unverified host already over the receiving cap — new gifts blocked."""

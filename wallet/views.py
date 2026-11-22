@@ -2,6 +2,8 @@ from rest_framework import viewsets, decorators, response, status
 from rest_framework.permissions import IsAuthenticated
 
 from accounts.models import BankAccount
+from django.core.cache import cache
+
 from integrations.gateways import payment_gateway
 from .models import TopUp, Wallet, WithdrawalRequest, WithdrawalError
 from .serializers import (BankAccountSerializer, LedgerEntrySerializer,
@@ -41,14 +43,60 @@ class WalletViewSet(viewsets.ViewSet):
         qs = wallet.withdrawals.order_by("-created_at")
         return response.Response(WithdrawalRequestSerializer(qs, many=True).data)
 
+    @decorators.action(detail=False, methods=["get"])
+    def banks(self, request):
+        """Nigerian banks with their codes (from Paystack), cached for a day."""
+        banks = cache.get("paystack_banks")
+        if not banks:
+            banks = sorted(payment_gateway.list_banks(), key=lambda b: b["name"].lower())
+            if banks:
+                cache.set("paystack_banks", banks, 60 * 60 * 24)
+        return response.Response(banks or [])
+
+    @decorators.action(detail=False, methods=["post"], url_path="resolve-account")
+    def resolve_account(self, request):
+        """Look up the name on an account before the host saves it."""
+        number = (request.data.get("account_number") or "").strip()
+        code = (request.data.get("bank_code") or "").strip()
+        if not (number.isdigit() and len(number) == 10 and code):
+            return response.Response({"detail": "Choose a bank and enter the 10-digit account number."},
+                                     status=status.HTTP_400_BAD_REQUEST)
+        name = payment_gateway.resolve_account(account_number=number, bank_code=code)
+        if not name:
+            return response.Response({"detail": "We couldn't find that account. Check the number and the bank."},
+                                     status=status.HTTP_404_NOT_FOUND)
+        return response.Response({"account_name": name})
+
     @decorators.action(detail=False, methods=["get", "put"], url_path="bank-account")
     def bank_account(self, request):
-        """GET the saved payout account, or PUT to set/replace it."""
+        """GET the saved payout account, or PUT to set/replace it. Saving looks
+        the account up (so the name is the bank's, not typed) and sets up the
+        Paystack subaccount that card gifts settle into."""
         if request.method == "PUT":
             ser = BankAccountSerializer(data=request.data)
             ser.is_valid(raise_exception=True)
-            BankAccount.objects.update_or_create(
-                user=request.user, defaults=ser.validated_data)
+            data = ser.validated_data
+            code = data.get("bank_code", "")
+            if not code:
+                return response.Response({"bank_code": ["Choose your bank."]},
+                                         status=status.HTTP_400_BAD_REQUEST)
+            name = payment_gateway.resolve_account(account_number=data["account_number"], bank_code=code)
+            if not name:
+                return response.Response(
+                    {"detail": "We couldn't find that account. Check the number and the bank."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            old = getattr(request.user, "bank_account", None)
+            same = bool(old and old.paystack_subaccount and old.bank_code == code
+                        and old.account_number == data["account_number"])
+            sub = old.paystack_subaccount if same else payment_gateway.create_subaccount(
+                business_name=(request.user.first_name or name).strip(), bank_code=code,
+                account_number=data["account_number"], email=request.user.email)
+            BankAccount.objects.update_or_create(user=request.user, defaults={
+                "bank_name": data["bank_name"], "bank_code": code,
+                "account_number": data["account_number"], "account_name": name,
+                "paystack_subaccount": sub or "",
+            })
+            request.user.refresh_from_db()
         acct = getattr(request.user, "bank_account", None)
         return response.Response(BankAccountSerializer(acct).data if acct else None)
 

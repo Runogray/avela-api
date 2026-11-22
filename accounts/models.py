@@ -125,8 +125,12 @@ class BankAccount(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
                                 related_name="bank_account")
     bank_name = models.CharField(max_length=80)
+    # The bank's code (CBN/Paystack), needed to pay into the account.
+    bank_code = models.CharField(max_length=20, blank=True)
     account_number = models.CharField(max_length=20)
     account_name = models.CharField(max_length=140, blank=True)
+    # Paystack subaccount for this account: card gifts settle straight into it.
+    paystack_subaccount = models.CharField(max_length=40, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
 

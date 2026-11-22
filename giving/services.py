@@ -34,6 +34,10 @@ class NoBankAccount(Exception):
     """The host hasn't added the bank account guests transfer into."""
 
 
+class PaymentUnavailable(Exception):
+    """The gateway couldn't start a payment."""
+
+
 class GiftUnavailable(Exception):
     """The wishlist item is already bought, fully funded, or the amount is
     more than what's left to fund it."""
@@ -84,16 +88,8 @@ def create_gift(*, event, amount_kobo, giver_name="", message="",
     return {"gift": gift, "checkout_url": init["checkout_url"]}
 
 
-def create_transfer_gift(*, event, amount_kobo, giver_name="", giver_email="", message="",
-                         show_name=True, show_amount=True, goal=None,
-                         wishlist_item=None) -> dict:
-    host = event.host
-    bank = getattr(host, "bank_account", None)
-    if bank is None:
-        raise NoBankAccount(
-            f"{event.title} isn't set up to receive transfers yet. "
-            "The host needs to add their bank account."
-        )
+def _check_item_open(wishlist_item, amount_kobo):
+    """A gift toward an item must fit what's still open on it."""
     if wishlist_item is not None:
         state = wishlist_item.availability
         if state == "bought":
@@ -113,6 +109,19 @@ def create_transfer_gift(*, event, amount_kobo, giver_name="", giver_email="", m
             raise GiftUnavailable(
                 f"Only {naira_short(remaining)} is left to fully fund {wishlist_item.name}.",
                 "over_remaining")
+
+
+def create_transfer_gift(*, event, amount_kobo, giver_name="", giver_email="", message="",
+                         show_name=True, show_amount=True, goal=None,
+                         wishlist_item=None) -> dict:
+    host = event.host
+    bank = getattr(host, "bank_account", None)
+    if bank is None:
+        raise NoBankAccount(
+            f"{event.title} isn't set up to receive transfers yet. "
+            "The host needs to add their bank account."
+        )
+    _check_item_open(wishlist_item, amount_kobo)
     allowed, crossing = host.can_receive(amount_kobo)
     if not allowed:
         raise GiftBlocked(
@@ -129,6 +138,90 @@ def create_transfer_gift(*, event, amount_kobo, giver_name="", giver_email="", m
         gift_token=secrets.token_urlsafe(18),
     )
     return {"gift": gift, "bank": bank}
+
+
+# Paystack's local fee: 1.5% + ₦100 (the ₦100 waived under ₦2,500), capped at ₦2,000.
+def gateway_fee_kobo(total_kobo: int) -> int:
+    fee = -(-total_kobo * 15 // 1000)  # 1.5%, rounded up
+    if total_kobo >= 250_000:
+        fee += 10_000
+    return min(fee, 200_000)
+
+
+def card_fee_kobo(gift_kobo: int) -> int:
+    """What the guest pays on top so the host receives the whole gift: the
+    total is grossed up until Paystack's fee on it is covered, then rounded up
+    to the whole naira."""
+    total = gift_kobo
+    for _ in range(10):
+        nxt = gift_kobo + gateway_fee_kobo(total)
+        if nxt == total:
+            break
+        total = nxt
+    total = -(-total // 100) * 100
+    while total - gift_kobo < gateway_fee_kobo(total):  # rounding can tip it over
+        total += 100
+    return total - gift_kobo
+
+
+def create_card_gift(*, event, amount_kobo, callback_url, giver_name="", giver_email="",
+                     message="", show_name=True, show_amount=True, goal=None,
+                     wishlist_item=None) -> dict:
+    """Start a card/USSD/bank payment that settles straight into the host's
+    bank (their Paystack subaccount). The guest pays the gift plus the fee;
+    we keep exactly the fee, which covers Paystack's charge."""
+    from integrations.gateways import card_payments_enabled
+    host = event.host
+    bank = getattr(host, "bank_account", None)
+    if not card_payments_enabled() or bank is None or not bank.paystack_subaccount:
+        raise NoBankAccount(f"{event.title} can't take card payments yet. You can send a bank transfer instead.")
+    _check_item_open(wishlist_item, amount_kobo)
+    allowed, crossing = host.can_receive(amount_kobo)
+    if not allowed:
+        raise GiftBlocked(
+            f"{event.title} can't receive gifts right now. "
+            "The host has been notified to verify and unlock them."
+        )
+    fee = card_fee_kobo(amount_kobo)
+    gift = MonetaryGift.objects.create(
+        event=event, goal=goal, wishlist_item=wishlist_item,
+        amount_kobo=amount_kobo, fee_kobo=fee, paid_direct=True,
+        message=message, giver_name=giver_name, giver_email=giver_email,
+        show_name=show_name, show_amount=show_amount, is_crossing=crossing,
+        method=MonetaryGift.Method.GATEWAY, gift_token=secrets.token_urlsafe(18),
+    )
+    init = payment_gateway.init_transaction(
+        amount_kobo=amount_kobo + fee, email=giver_email,
+        metadata={"gift_id": str(gift.id), "event": event.slug},
+        subaccount=bank.paystack_subaccount, transaction_charge=fee,
+        callback_url=callback_url.replace("{token}", gift.gift_token),
+        # Local channels only: international cards cost more than the fee covers.
+        channels=["card", "bank", "ussd", "bank_transfer"],
+    )
+    if not init.get("reference") or not init.get("checkout_url"):
+        gift.status = MonetaryGift.Status.FAILED
+        gift.save(update_fields=["status"])
+        raise PaymentUnavailable("We couldn't start the card payment. Please try again, or send a bank transfer.")
+    gift.gateway_reference = init["reference"]
+    gift.save(update_fields=["gateway_reference"])
+    return {"gift": gift, "checkout_url": init["checkout_url"]}
+
+
+def settle_card_gift(gift: MonetaryGift) -> MonetaryGift:
+    """Confirm a card gift once the gateway says the full amount was paid.
+    Safe to call repeatedly (webhook, the guest's return, a retry)."""
+    if gift.method != MonetaryGift.Method.GATEWAY or gift.status != MonetaryGift.Status.INITIATED:
+        return gift
+    if not gift.gateway_reference:
+        return gift
+    tx = payment_gateway.fetch(gift.gateway_reference)
+    if tx.get("status") != "success":
+        return gift
+    paid = tx.get("amount")
+    if paid is not None and int(paid) < gift.amount_kobo + gift.fee_kobo:
+        logging.getLogger(__name__).warning("Gift %s underpaid: %s", gift.id, paid)
+        return gift
+    return confirm_gift(gift)
 
 
 def mark_transfer_sent(gift: MonetaryGift) -> MonetaryGift:
@@ -203,8 +296,9 @@ def confirm_gift(gift: MonetaryGift) -> MonetaryGift:
     host.cumulative_received_kobo += gift.amount_kobo
     host.save(update_fields=["cumulative_received_kobo"])
 
-    if gift.method == MonetaryGift.Method.GATEWAY:
-        # Bank transfers land in the host's own account, never the wallet.
+    if gift.method == MonetaryGift.Method.GATEWAY and not gift.paid_direct:
+        # Bank transfers and card gifts paid straight to the host's bank
+        # (subaccount) never touch the wallet.
         wallet, _ = Wallet.objects.get_or_create(host=host)
         wallet.credit_pending(gift.amount_kobo, memo=f"Gift on {gift.event.title}")
         # DEV: settle immediately so dev wallets have a spendable balance. In
@@ -219,10 +313,14 @@ def confirm_gift(gift: MonetaryGift) -> MonetaryGift:
     # Notify the host (lazy import avoids an accounts↔giving import cycle).
     from accounts.services import gift_link, notify
     if gift.method == MonetaryGift.Method.GATEWAY:
-        notify(host, "contribution", "New contribution",
-               f"{gift.public_giver} sent {naira_short(gift.amount_kobo)} on {gift.event.title}.",
+        who = gift.giver_name or "A guest"
+        toward = (gift.goal.name if gift.goal_id else
+                  gift.wishlist_item.name if gift.wishlist_item_id else gift.event.title)
+        notify(host, "contribution", "New gift",
+               f"{who} paid {naira_short(gift.amount_kobo)} by card toward {toward}. "
+               "It's on its way to your bank.",
                link=gift_link(gift.event_id, gift.wishlist_item_id or gift.goal_id, gift.id))
-    elif gift.giver_email:
+    if gift.giver_email:
         from accounts.emails import send_gift_received
         _email_guest(send_gift_received, gift.giver_email, gift.giver_name, gift.event,
                      f"your {naira_short(gift.amount_kobo)} gift", gift_page_url(gift.gift_token))
